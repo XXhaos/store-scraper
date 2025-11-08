@@ -1,6 +1,6 @@
 # Overview
 
-**Game Store Catalog** is a cross-store indexing and data standardization project designed to maintain accurate, normalized information about games across multiple digital storefronts.
+This project is used to update the databases used by [Game Store Catalog](https://github.com/Ephellon/game-store-catalog)—a cross-store indexing and data standardization project designed to maintain accurate, normalized information about games across multiple digital storefronts.
 
 ### Supported Stores
 
