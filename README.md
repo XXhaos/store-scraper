@@ -30,15 +30,15 @@ Each entry corresponds to a single game and includes metadata fields.
 
 ```json
 [
-  ["The Legend of Zelda: Tears of the Kingdom", {
-    "type": "game",
-    "price": "$69.99",
-    "image": "https://assets.nintendo.com/zelda.jpg",
-    "href": "https://store.nintendo.com/...",
-    "uuid": "ZELDA-TOTK",
-    "platforms": ["Switch"],
-    "rating": "everyone 10+"
-  }]
+    ["The Legend of Zelda: Tears of the Kingdom", {
+        "type": "game",
+        "price": "$69.99",
+        "image": "https://assets.nintendo.com/zelda.jpg",
+        "href": "https://store.nintendo.com/...",
+        "uuid": "ZELDA-TOTK",
+        "platforms": ["Switch"],
+        "rating": "everyone 10+"
+    }]
 ]
 ```
 
@@ -50,16 +50,16 @@ Each file is an array of simple objects used for alphabetical browsing.
 
 ```json
 [
-  {
-    "name": "A Plague Tale: Requiem",
-    "type": "game",
-    "price": "$49.99",
-    "image": "https://cdn.store.steamstatic.com/...jpg",
-    "href": "https://store.steampowered.com/app/1182900/",
-    "uuid": "1182900",
-    "platforms": ["Windows", "PS5", "Xbox Series X"],
-    "rating": "mature 17+"
-  }
+    {
+        "name": "A Plague Tale: Requiem",
+        "type": "game",
+        "price": "$49.99",
+        "image": "https://cdn.store.steamstatic.com/...jpg",
+        "href": "https://store.steampowered.com/app/1182900/",
+        "uuid": "1182900",
+        "platforms": ["Windows", "PS5", "Xbox Series X"],
+        "rating": "mature 17+"
+    }
 ]
 ```
 

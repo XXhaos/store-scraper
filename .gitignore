@@ -1,10 +1,9 @@
 # Ignore these file-types
-# *.txt
-
-# Ignore these files
-# file.txt
+*.txt
 
 # Ignore these folders
-# dir\
-.git\
-__pycache__\
+.git/
+__pycache__/
+*.egg-info/
+build/
+out/
