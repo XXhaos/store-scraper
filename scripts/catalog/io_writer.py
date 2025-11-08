@@ -25,7 +25,7 @@ def write_catalog(out_dir: str, store: str, rows: Iterable[GameRecord]) -> None:
          rating=rec.rating if rec.rating else None
       )
       buckets[letter_bucket(rec.name)].append(item)
-      bang.append([rec.name, item.model_dump()])  # 2-item list
+      bang.append([rec.name, item.model_dump(mode="json")])  # 2-item list
 
    # stable-ish ordering per-letter
    for k in buckets:
@@ -34,7 +34,7 @@ def write_catalog(out_dir: str, store: str, rows: Iterable[GameRecord]) -> None:
    # Write per-letter
    for k, arr in buckets.items():
       with open(os.path.join(base, f"{k}.json"), "w", encoding="utf-8") as fp:
-         json.dump([i.model_dump() for i in arr], fp, ensure_ascii=False, indent=2)
+         json.dump([i.model_dump(mode="json") for i in arr], fp, ensure_ascii=False, indent=2)
 
    # Write bang file
    with open(os.path.join(base, "!.json"), "w", encoding="utf-8") as fp:
