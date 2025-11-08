@@ -46,10 +46,11 @@ class PSNEndpoints:
    # Seed listing pages (Next.js pages) to crawl and parse (__NEXT_DATA__/JSON-LD)
    seed_pages: List[str] | None = None
 
-def _default_seed_pages(country: str, locale: str) -> List[str]:
+def _default_seed_pages(_country: str, locale: str) -> List[str]:
    # These are general directory pages that often embed large product lists.
    # You can add/remove based on what your region exposes.
-   base = f"https://store.playstation.com/{locale.lower()}-{country.lower()}"
+   loc = locale.replace("_", "-").lower()
+   base = f"https://store.playstation.com/{loc}"
    return [
       f"{base}/pages/browse/ps5-games",
       f"{base}/pages/browse/ps4-games",
@@ -64,13 +65,15 @@ class PSNAdapter(Adapter):
    def __init__(self, *, config: AdapterConfig | None = None,
                 endpoints: PSNEndpoints | None = None, **kw):
       super().__init__(config=config, **kw)
+      # Default to GraphQL category grids (pagination) and HTML fallbacks. The
+      # legacy productsearch endpoint has been deprecated and is left
+      # unconfigured unless explicitly provided via PSNEndpoints.
       self.endpoints = endpoints or PSNEndpoints(
-         search_api=(
-            "https://store.playstation.com/api/productsearch/v2"
-            "?query={query}&size={size}&country={country}&language={language}&lang={lang}&offset={offset}"
-         ),
          seed_pages=_default_seed_pages(self.config.country, self.config.locale),
       )
+
+   def _locale_path(self) -> str:
+      return self.config.locale.replace("_", "-").lower()
 
    # ---------- public contract ----------
 
@@ -145,8 +148,8 @@ class PSNAdapter(Adapter):
 
       headers = {
          "Accept": "application/json",
-         "X-PSN-Store-Locale": f"{self.config.locale.lower()}-{self.config.country.lower()}",
-         "Referer": f"https://store.playstation.com/{self.config.locale.lower()}-{self.config.country.lower()}",
+         "X-PSN-Store-Locale": self._locale_path(),
+         "Referer": f"https://store.playstation.com/{self._locale_path()}",
       }
 
       locale = self.config.locale.replace("_", "-")
@@ -289,7 +292,7 @@ class PSNAdapter(Adapter):
       )
 
       image = str(image) if image else "https://store.playstation.com/assets/cover-placeholder.png"
-      href = str(href) if href else f"https://store.playstation.com/{self.config.locale.lower()}-{self.config.country.lower()}"
+      href = str(href) if href else f"https://store.playstation.com/{self._locale_path()}"
 
       return GameRecord(
          store="psn",
@@ -307,7 +310,7 @@ class PSNAdapter(Adapter):
 
    async def _iter_category_grid(self, category_id: str, *, page_size: int = 24) -> AsyncIterator[Optional[GameRecord]]:
       """Iterate products from the categoryGridRetrieve GraphQL endpoint."""
-      base_locale = f"{self.config.locale.lower()}-{self.config.country.lower()}"
+      base_locale = self._locale_path()
       headers = {
          "Accept": "application/json",
          "Content-Type": "application/json",
@@ -414,7 +417,7 @@ class PSNAdapter(Adapter):
       )
 
    def _build_product_url(self, product_id: Optional[str]) -> str:
-      base = f"https://store.playstation.com/{self.config.locale.lower()}-{self.config.country.lower()}"
+      base = f"https://store.playstation.com/{self._locale_path()}"
       if product_id:
          return f"{base}/product/{product_id}"
       return base
