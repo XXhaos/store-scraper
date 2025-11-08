@@ -2,12 +2,19 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from urllib.parse import quote_plus, urlparse, parse_qs
 from dataclasses import dataclass
 from typing import AsyncIterator, Dict, Any, List, Optional
 
 from catalog.adapters.base import Adapter, AdapterConfig, Capabilities
 from catalog.models import GameRecord
-from catalog.normalize import clean_title, strip_edition_noise, price_to_string
+from catalog.normalize import (
+   clean_title,
+   strip_edition_noise,
+   price_to_string,
+   normalize_platforms,
+   normalize_rating,
+)
 from catalog.http import DomainLimiter
 
 # Microsoft/Xbox pages are SPA-driven and often embed large JSON blobs.
@@ -70,7 +77,10 @@ class XboxAdapter(Adapter):
                 endpoints: XboxEndpoints | None = None, **kw):
       super().__init__(config=config, **kw)
       self.endpoints = endpoints or XboxEndpoints(
-         search_api=None,  # fill if you have a working JSON endpoint
+         search_api=(
+            "https://www.xbox.com/xwebapp/UnifiedSearch"
+            "?Locale={locale}&Market={country}&Query={query}&Skip={skip}&Take={count}"
+         ),
          seed_pages=_default_seed_pages(self.config.country, self.config.locale),
       )
 
@@ -95,19 +105,19 @@ class XboxAdapter(Adapter):
    async def _iter_search_api(self, *, query: str, page_size: int = 60) -> AsyncIterator[Optional[GameRecord]]:
       assert self.endpoints.search_api, "search_api endpoint template not configured"
 
-      async def fetch_page(page_index: int) -> Dict[str, Any]:
-         url = self.endpoints.search_api.format(
-            query=query,
-            count=page_size,
-            country=self.config.country,
-            locale=self.config.locale,
-            page=page_index,
-         )
-         return await self.get_json(url, headers={"Accept": "application/json"})
-
-      page = 0
+      headers = {"Accept": "application/json"}
+      locale = self.config.locale.replace("_", "-").lower()
+      skip = 0
       while True:
-         js = await fetch_page(page)
+         url = self.endpoints.search_api.format(
+            query=quote_plus(query),
+            count=page_size,
+            country=self.config.country.upper(),
+            locale=locale,
+            skip=skip,
+            page=skip // max(1, page_size),
+         )
+         js = await self.get_json(url, headers=headers)
          items = self._extract_items_from_api(js)
          count = 0
          for it in items:
@@ -115,9 +125,10 @@ class XboxAdapter(Adapter):
             if rec:
                count += 1
                yield rec
-         if count < page_size:  # naive stop condition; adapt for your endpoint
+         next_skip = self._next_skip(js, skip, count, page_size)
+         if next_skip is None:
             break
-         page += 1
+         skip = next_skip
          await asyncio.sleep(0.05)
 
    def _extract_items_from_api(self, js: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -137,6 +148,54 @@ class XboxAdapter(Adapter):
             if isinstance(v, list) and v:
                return v
       return []
+
+   def _next_skip(self, js: Dict[str, Any], skip: int, produced: int, page_size: int) -> Optional[int]:
+      paging = js.get("paging") or js.get("Paging")
+      total = None
+      if isinstance(paging, dict):
+         for key in ("totalItems", "TotalItems", "totalResults", "TotalResults", "totalCount", "TotalCount", "total"):
+            if key in paging:
+               try:
+                  total = int(paging[key])
+               except Exception:
+                  total = None
+               break
+         for key in ("nextOffset", "nextSkip"):
+            if key in paging:
+               try:
+                  return int(paging[key])
+               except Exception:
+                  return None
+         for key in ("skip", "Skip"):
+            if key in paging:
+               try:
+                  base = int(paging[key])
+               except Exception:
+                  base = skip
+               if total is not None and (base + produced) < total:
+                  return base + max(produced, page_size)
+      links = js.get("links") or js.get("Links") or {}
+      if isinstance(links, dict):
+         for key in ("next", "Next", "nextLink", "NextLink"):
+            href = links.get(key)
+            if not isinstance(href, str):
+               continue
+            try:
+               parsed = urlparse(href)
+            except Exception:
+               continue
+            qs = parse_qs(parsed.query)
+            for candidate in ("skip", "Skip", "start", "Start"):
+               if candidate in qs and qs[candidate]:
+                  try:
+                     return int(qs[candidate][0])
+                  except Exception:
+                     continue
+      if total is not None and (skip + produced) < total:
+         return skip + max(produced, page_size)
+      if produced >= page_size:
+         return skip + produced
+      return None
 
    def _normalize_api_item(self, it: Dict[str, Any]) -> Optional[GameRecord]:
       # Titles can come from "Title", "Name", or "displayName"
@@ -213,7 +272,12 @@ class XboxAdapter(Adapter):
                platforms.append(str(p))
       elif isinstance(plats, str):
          platforms = [plats]
-      platforms = [p for p in platforms if p]
+      platforms = normalize_platforms(platforms)
+
+      raw_rating = it.get("ContentRating") or it.get("contentRating") or it.get("Rating") or it.get("rating")
+      if isinstance(raw_rating, dict):
+         raw_rating = raw_rating.get("Name") or raw_rating.get("name") or raw_rating.get("value")
+      rating = normalize_rating(raw_rating)
 
       # UUID: productId/legacyId
       uuid = it.get("ProductId") or it.get("productId") or it.get("legacyId") or it.get("id")
@@ -226,7 +290,7 @@ class XboxAdapter(Adapter):
          href=str(href),
          uuid=str(uuid) if uuid else None,
          platforms=platforms,
-         rating=None,
+         rating=rating,
          type="game",
       )
 
@@ -375,8 +439,10 @@ class XboxAdapter(Adapter):
 
       # Platforms (if present)
       plats = it.get("platforms") or it.get("Platforms") or it.get("badges") or []
-      if plats:
-         guess["Platforms"] = plats
+      if isinstance(plats, list):
+         guess["Platforms"] = normalize_platforms(plats)
+      elif isinstance(plats, str):
+         guess["Platforms"] = normalize_platforms([plats])
 
       # Id
       guess["ProductId"] = it.get("productId") or it.get("id") or it.get("legacyId")
@@ -408,6 +474,7 @@ class XboxAdapter(Adapter):
       # JSON-LD rarely lists Xbox variants explicitly; leave empty unless recognizable
       if "Xbox" in (b.get("name") or ""):
          platforms.append("Xbox")
+      platforms = normalize_platforms(platforms)
 
       return GameRecord(
          store="xbox",

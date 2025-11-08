@@ -2,12 +2,19 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from urllib.parse import quote_plus, urlparse, parse_qs
 from dataclasses import dataclass
 from typing import AsyncIterator, Dict, Any, List, Optional
 
 from catalog.adapters.base import Adapter, AdapterConfig, Capabilities
 from catalog.models import GameRecord
-from catalog.normalize import clean_title, strip_edition_noise, price_to_string
+from catalog.normalize import (
+   clean_title,
+   strip_edition_noise,
+   price_to_string,
+   normalize_platforms,
+   normalize_rating,
+)
 from catalog.http import DomainLimiter
 
 # Notes:
@@ -56,7 +63,10 @@ class PSNAdapter(Adapter):
                 endpoints: PSNEndpoints | None = None, **kw):
       super().__init__(config=config, **kw)
       self.endpoints = endpoints or PSNEndpoints(
-         search_api=None,  # fill in if you have a working JSON endpoint
+         search_api=(
+            "https://store.playstation.com/api/productsearch/v2"
+            "?query={query}&size={size}&country={country}&language={language}&lang={lang}&offset={offset}"
+         ),
          seed_pages=_default_seed_pages(self.config.country, self.config.locale),
       )
 
@@ -90,37 +100,81 @@ class PSNAdapter(Adapter):
       """
       assert self.endpoints.search_api, "search_api endpoint template not configured"
 
-      async def fetch_page(page: int, size: int) -> Dict[str, Any]:
-         url = self.endpoints.search_api.format(
-            query=query,
-            size=size,
-            country=self.config.country,
-            lang=self.config.locale,
-            page=page // size,   # adjust math depending on the API contract
-         )
-         js = await self.get_json(url, headers={"Accept": "application/json"})
-         return js
+      headers = {
+         "Accept": "application/json",
+         "X-PSN-Store-Locale": f"{self.config.locale.lower()}-{self.config.country.lower()}",
+         "Referer": f"https://store.playstation.com/{self.config.locale.lower()}-{self.config.country.lower()}",
+      }
 
-      def has_more(js: Dict[str, Any]) -> bool:
-         # Heuristic: many APIs return total hits and current offset/page.
-         # Replace with whatever your endpoint provides.
-         total = (js.get("totalResults") or js.get("total") or 0)
-         items = (js.get("results") or js.get("items") or [])
-         offset = (js.get("offset") or js.get("page", 0) * page_size)
-         return (offset + len(items)) < total
-
-      page = 0
+      locale = self.config.locale.replace("_", "-")
+      language = locale.split("-")[0]
+      offset = 0
       while True:
-         js = await fetch_page(page, page_size)
-         items = (js.get("results") or js.get("items") or [])
-         for it in items:
+         url = self.endpoints.search_api.format(
+            query=quote_plus(query),
+            size=page_size,
+            country=self.config.country.upper(),
+            language=language,
+            lang=locale,
+            offset=offset,
+         )
+         js = await self.get_json(url, headers=headers)
+         items = js.get("products") or js.get("results") or js.get("items") or []
+         if isinstance(items, dict):
+            items = items.get("products") or []
+         count = 0
+         for it in items or []:
             rec = self._normalize_api_item(it)
             if rec:
+               count += 1
                yield rec
-         if not has_more(js):
-            break
-         page += page_size
-         await asyncio.sleep(0.05)
+         next_offset = None
+         links = js.get("links") or {}
+         if isinstance(links, dict):
+            for key in ("next", "nextPage", "nextPageUrl"):
+               href = links.get(key)
+               if not isinstance(href, str):
+                  continue
+               try:
+                  parsed = urlparse(href)
+               except Exception:
+                  parsed = None
+               if not parsed:
+                  continue
+               qs = parse_qs(parsed.query)
+               for qk in ("offset", "start"):
+                  if qk in qs and qs[qk]:
+                     try:
+                        next_offset = int(qs[qk][0])
+                        break
+                     except Exception:
+                        next_offset = None
+               if next_offset is None and "page" in qs and qs["page"]:
+                  try:
+                     next_offset = int(qs["page"][0]) * page_size
+                  except Exception:
+                     next_offset = None
+               if next_offset is not None:
+                  break
+            if next_offset is not None:
+               offset = next_offset
+               await asyncio.sleep(0.05)
+               continue
+         total = js.get("total_results") or js.get("totalResults") or js.get("total")
+         if total is not None:
+            try:
+               total = int(total)
+            except Exception:
+               total = None
+         if total is not None and (offset + count) < total:
+            offset += count or page_size
+            await asyncio.sleep(0.05)
+            continue
+         if count >= page_size:
+            offset += count
+            await asyncio.sleep(0.05)
+            continue
+         break
 
    def _normalize_api_item(self, it: Dict[str, Any]) -> Optional[GameRecord]:
       """
@@ -174,7 +228,7 @@ class PSNAdapter(Adapter):
             platforms.append(p.get("name") or p.get("platform") or "")
          else:
             platforms.append(str(p))
-      platforms = [p for p in platforms if p]
+      platforms = normalize_platforms(platforms)
 
       # rating (ESRB-like)
       rating = None
@@ -183,6 +237,8 @@ class PSNAdapter(Adapter):
          rating = ratings.get("display") or ratings.get("ageRating")
       elif isinstance(ratings, list) and ratings:
          rating = (ratings[0].get("display") or ratings[0].get("ageRating"))
+
+      rating = normalize_rating(rating)
 
       uuid = (
          it.get("id") or it.get("skuId") or it.get("productId") or
@@ -200,7 +256,7 @@ class PSNAdapter(Adapter):
          href=href,
          uuid=str(uuid) if uuid else None,
          platforms=platforms,
-         rating=(rating.lower() if isinstance(rating, str) else None),
+         rating=rating,
          type="game",
       )
 
@@ -291,7 +347,7 @@ class PSNAdapter(Adapter):
                plats.append(str(p))
       elif isinstance(psrc, str):
          plats = [psrc]
-      guess["platforms"] = [p for p in plats if p]
+      guess["platforms"] = normalize_platforms(plats)
 
       # price
       price = it.get("price") or {}
@@ -369,6 +425,7 @@ class PSNAdapter(Adapter):
          platforms.append("PS5")
       if "PlayStation 4" in (b.get("name") or ""):
          platforms.append("PS4")
+      platforms = normalize_platforms(platforms)
 
       return GameRecord(
          store="psn",

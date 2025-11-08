@@ -5,14 +5,6 @@ from typing import Iterable, Tuple, List
 from catalog.models import GameRecord, LetterItem
 from catalog.normalize import letter_bucket
 
-import logging
-
-logging.basicConfig(
-    level=logging.DEBUG,  # Set the lowest level you want to capture
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%H:%M:%S"
-)
-
 def write_catalog(out_dir: str, store: str, rows: Iterable[GameRecord]) -> None:
    base = os.path.join(out_dir, store)
    os.makedirs(base, exist_ok=True)

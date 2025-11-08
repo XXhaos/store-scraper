@@ -2,12 +2,19 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from urllib.parse import quote_plus
 from dataclasses import dataclass
 from typing import AsyncIterator, Dict, Any, List, Optional
 
 from catalog.adapters.base import Adapter, AdapterConfig, Capabilities
 from catalog.models import GameRecord
-from catalog.normalize import clean_title, strip_edition_noise, price_to_string
+from catalog.normalize import (
+   clean_title,
+   strip_edition_noise,
+   price_to_string,
+   normalize_platforms,
+   normalize_rating,
+)
 from catalog.http import DomainLimiter
 
 # Nintendo's public surface varies by region and frequently embeds data in the page.
@@ -35,6 +42,9 @@ class NintendoEndpoints:
    # Example (fill if you’ve got one for your locale/market):
    # "https://www.nintendo.com/search/api?query={query}&count={count}&country={country}&locale={locale}&page={page}"
    search_api: Optional[str] = None
+   algolia_app_id: Optional[str] = None
+   algolia_api_key: Optional[str] = None
+   algolia_index: Optional[str] = None
 
    # Listing pages that contain many products (per locale)
    seed_pages: List[str] = None
@@ -63,7 +73,10 @@ class NintendoAdapter(Adapter):
                 endpoints: NintendoEndpoints | None = None, **kw):
       super().__init__(config=config, **kw)
       self.endpoints = endpoints or NintendoEndpoints(
-         search_api=None,  # set if you have a working JSON endpoint
+         search_api="https://u3b6gr4ua3-dsn.algolia.net/1/indexes/*/queries",
+         algolia_app_id="U3B6GR4UA3",
+         algolia_api_key="9a2c7a43f1f6c9616bf1b9d5f3fa0c6e",
+         algolia_index="ncom_game_en_{country}",
          seed_pages=_default_seed_pages(self.config.country, self.config.locale),
       )
 
@@ -88,27 +101,67 @@ class NintendoAdapter(Adapter):
    async def _iter_search_api(self, *, query: str, page_size: int = 60) -> AsyncIterator[Optional[GameRecord]]:
       assert self.endpoints.search_api, "search_api endpoint template not configured"
 
-      async def fetch_page(page_index: int) -> Dict[str, Any]:
-         url = self.endpoints.search_api.format(
-            query=query,
-            count=page_size,
-            country=self.config.country,
-            locale=self.config.locale,
-            page=page_index,
-         )
-         return await self.get_json(url, headers={"Accept": "application/json"})
+      headers = {"Accept": "application/json"}
+      if self.endpoints.algolia_app_id and self.endpoints.algolia_api_key:
+         headers.update({
+            "X-Algolia-Application-Id": self.endpoints.algolia_app_id,
+            "X-Algolia-API-Key": self.endpoints.algolia_api_key,
+         })
+
+      locale = self.config.locale.replace("_", "-").lower()
+      index_template = self.endpoints.algolia_index or "ncom_game_en_{country}"
+      index_name = index_template.format(country=self.config.country.lower(), locale=locale)
 
       page = 0
       while True:
-         js = await fetch_page(page)
-         items = self._extract_items_from_api(js)
+         params = {
+            "query": quote_plus(query),
+            "hitsPerPage": str(page_size),
+            "page": str(page),
+         }
+        
+         payload = {
+            "requests": [
+               {
+                  "indexName": index_name,
+                  "params": "&".join(f"{k}={v}" for k, v in params.items()),
+               }
+            ]
+         }
+
+         if self.endpoints.search_api.endswith("/queries"):
+            resp = await self.request("POST", self.endpoints.search_api, json=payload, headers=headers)
+            js = resp.json()
+            results = (js.get("results") or [])
+            if results:
+               items = results[0].get("hits") or []
+               nb_pages = results[0].get("nbPages")
+            else:
+               items = []
+               nb_pages = None
+         else:
+            js = await self.get_json(self.endpoints.search_api.format(
+               query=query,
+               count=page_size,
+               country=self.config.country,
+               locale=self.config.locale,
+               page=page,
+            ), headers=headers)
+            items = self._extract_items_from_api(js)
+            nb_pages = None
+
          count = 0
          for it in items:
-            rec = self._normalize_api_item(it)
+            coalesced = self._coerce_algolia_hit(it) if self.endpoints.search_api.endswith("/queries") else it
+            rec = self._normalize_api_item(coalesced)
             if rec:
                count += 1
                yield rec
-         if count < page_size:  # naive stop condition; adapt when endpoint exposes total/next
+
+         if nb_pages is not None:
+            if page + 1 >= nb_pages:
+               break
+         if count < page_size:
             break
          page += 1
          await asyncio.sleep(0.05)
@@ -196,6 +249,16 @@ class NintendoAdapter(Adapter):
       platforms = it.get("platforms") or []
       if not platforms:
          platforms = ["Switch"]
+      platforms = normalize_platforms(platforms)
+
+      raw_rating = it.get("rating") or it.get("ratings")
+      if isinstance(raw_rating, dict):
+         raw_rating = raw_rating.get("display") or raw_rating.get("name")
+      elif isinstance(raw_rating, list) and raw_rating:
+         cand = raw_rating[0]
+         if isinstance(cand, dict):
+            raw_rating = cand.get("display") or cand.get("name")
+      rating = normalize_rating(raw_rating)
 
       # UUID: NSUID preferred if present
       uuid = it.get("nsuid") or it.get("id") or it.get("productId")
@@ -207,8 +270,8 @@ class NintendoAdapter(Adapter):
          image=image,
          href=str(href),
          uuid=str(uuid) if uuid else None,
-         platforms=[str(p) for p in platforms if p],
-         rating=None,
+         platforms=platforms,
+         rating=rating,
          type="game",
       )
 
@@ -288,8 +351,67 @@ class NintendoAdapter(Adapter):
 
       # platforms
       plats = it.get("platforms")
-      if plats:
-         guess["platforms"] = plats
+      if isinstance(plats, list):
+         guess["platforms"] = normalize_platforms(plats)
+      elif isinstance(plats, str):
+         guess["platforms"] = normalize_platforms([plats])
+
+      return guess
+
+   def _coerce_algolia_hit(self, hit: Any) -> Dict[str, Any]:
+      if not isinstance(hit, dict):
+         return {}
+      guess: Dict[str, Any] = {}
+
+      guess["title"] = hit.get("title") or hit.get("name") or hit.get("productTitle") or ""
+      guess["nsuid"] = hit.get("nsuid") or hit.get("id") or hit.get("productId")
+      if hit.get("slug"):
+         guess.setdefault("slug", hit.get("slug"))
+
+      image = hit.get("boxArt") or hit.get("heroBanner") or hit.get("image")
+      if image:
+         guess["image"] = image
+
+      link = hit.get("url") or hit.get("productUrl")
+      if not link and hit.get("slug"):
+         loc = self.config.locale.replace("_", "-").lower()
+         link = f"https://www.nintendo.com/{loc}/store/products/{hit['slug']}/"
+      guess["productUrl"] = link or None
+
+      price = hit.get("price") or hit.get("prices") or {}
+      if isinstance(price, dict):
+         amount = price.get("discounted") or price.get("current") or price.get("regular") or price.get("amount")
+         if amount is None and "raw" in price and isinstance(price["raw"], dict):
+            raw = price["raw"]
+            amount = raw.get("discounted") or raw.get("current") or raw.get("regular")
+         currency = price.get("currency") or price.get("currencyCode")
+         if isinstance(amount, (int, float)) and amount > 1000:
+            amount = float(amount) / 100.0
+         guess["price"] = {"amount": amount, "currency": currency}
+         display = price.get("display") or price.get("formatted") or price.get("rawValue")
+         if display:
+            guess["displayPrice"] = display
+      elif isinstance(price, (int, float)):
+         amt = float(price)
+         if amt > 1000:
+            amt = amt / 100.0
+         guess["price"] = {"amount": amt, "currency": hit.get("currency")}
+      elif isinstance(price, str):
+         guess["displayPrice"] = price
+
+      display_price = hit.get("priceDisplay") or hit.get("price_display") or hit.get("priceText")
+      if display_price and "displayPrice" not in guess:
+         guess["displayPrice"] = display_price
+
+      plats = hit.get("platforms") or hit.get("platform")
+      if isinstance(plats, list):
+         guess["platforms"] = normalize_platforms(plats)
+      elif isinstance(plats, str):
+         guess["platforms"] = normalize_platforms([plats])
+
+      rating = hit.get("rating") or hit.get("esrb") or hit.get("ageRating")
+      if rating:
+         guess["ratings"] = rating
 
       return guess
 
@@ -343,7 +465,7 @@ class NintendoAdapter(Adapter):
       href = b.get("url") or base_url
 
       # Nintendo output is primarily Switch
-      platforms: List[str] = ["Switch"]
+      platforms: List[str] = normalize_platforms(["Switch"])
 
       # NSUID is sometimes available in JSON-LD (not guaranteed)
       uuid = b.get("sku") or b.get("productID") or b.get("mpn") or None
