@@ -35,8 +35,12 @@ def write_catalog(out_dir: str, store: str, rows: Iterable[GameRecord]) -> None:
    for k in buckets:
       buckets[k].sort(key=lambda i: i.name.lower())
 
+   # ensure global bang list is sorted for deterministic output
+   bang.sort(key=lambda item: item[0].lower())
+
    # Write per-letter
-   for k, arr in buckets.items():
+   for k in sorted(buckets):
+      arr = buckets[k]
       with open(os.path.join(base, f"{k}.json"), "w", encoding="utf-8") as fp:
          json.dump([i.model_dump(mode="json") for i in arr], fp, ensure_ascii=False, indent=4)
 
