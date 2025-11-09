@@ -33,6 +33,10 @@ async def run_adapter(
                for idx, rec in enumerate(buf):
                   index_by_key[cache_key_for_record(rec)] = idx
                count = len(buf)
+               try:
+                  a.resume(cached_records)
+               except Exception as exc:
+                  log.warning("[%s] adapter resume hook failed: %s", a.store, exc)
                if progress is not None and task_id is not None:
                   progress.update(task_id, description=f"{a.store}: resumed {count} cached records")
 

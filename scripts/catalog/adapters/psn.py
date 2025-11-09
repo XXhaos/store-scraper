@@ -69,6 +69,7 @@ class PSNAdapter(Adapter):
       self.endpoints = endpoints or PSNEndpoints(
          seed_pages=_default_seed_pages(self.config.country, self.config.locale),
       )
+      self._resume_keys: Set[str] = set()
 
    def _locale_path(self) -> str:
       return self.config.locale.replace("_", "-").lower()
@@ -114,19 +115,35 @@ class PSNAdapter(Adapter):
                yield rec
          await asyncio.sleep(0.1)
 
+   def resume(self, records: List[GameRecord]) -> None:
+      super().resume(records)
+      for record in records:
+         if record.store != self.store:
+            continue
+         key = self._record_key(record)
+         if key:
+            self._resume_keys.add(key)
+
    def _mark_seen(self, rec: GameRecord, seen: Set[str]) -> bool:
+      key = self._record_key(rec)
+      if key is None:
+         return True
+      if key in self._resume_keys:
+         self._resume_keys.discard(key)
+         seen.add(key)
+         return False
+      if key in seen:
+         return False
+      seen.add(key)
+      return True
+
+   def _record_key(self, rec: GameRecord) -> Optional[str]:
       candidates = (
          rec.uuid,
          rec.href,
          rec.name and f"{rec.store}:{rec.name}",
       )
-      key = next((value for value in map(lambda candidate: candidate, candidates) if value), None)
-      if key is None:
-         return True
-      if key in seen:
-         return False
-      seen.add(key)
-      return True
+      return next((value for value in map(lambda candidate: candidate, candidates) if value), None)
 
    async def _iter_seed_page(self, url: str, discovered_category_ids: Set[str]) -> AsyncIterator[Optional[GameRecord]]:
       html = await self.get_text(url, headers={"Accept": "text/html"}, params=None)

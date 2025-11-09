@@ -49,6 +49,7 @@ class SteamAdapter(Adapter):
       self._skip_file = Path(skip_path) if skip_path else Path(__file__).with_name(".steamignore")
       self._skip_appids: Set[str] = self._load_skip_appids()
       self._request_count = 0
+      self._resume_appids: Set[str] = set()
 
    async def iter_games(self) -> AsyncIterator[GameRecord]:
       # Step 1: seed appids from the global Steam app list, fallback to featured categories
@@ -60,6 +61,9 @@ class SteamAdapter(Adapter):
       # Step 2: hydrate via appdetails (region-aware pricing via cc)
       seen: Set[str] = set()
       for appid in appids:
+         if appid in self._resume_appids:
+            self._resume_appids.discard(appid)
+            continue
          if self.skip_appid(appid):
             continue
 
@@ -76,6 +80,14 @@ class SteamAdapter(Adapter):
                seen.add(key)
             yield rec
          await asyncio.sleep(0.05)  # polite jitter between app calls
+
+   def resume(self, records: List[GameRecord]) -> None:
+      super().resume(records)
+      for record in records:
+         if record.store != self.store:
+            continue
+         if record.uuid:
+            self._resume_appids.add(str(record.uuid))
 
    async def request(self, method: str, url: str, **kw):
       kw.setdefault("retry_429_wait", 15.0)

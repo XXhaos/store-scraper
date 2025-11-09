@@ -108,6 +108,10 @@ class Adapter(abc.ABC):
       """
       ...
 
+   def resume(self, records: List[GameRecord]) -> None:
+      """Adapters can override to optimize when resuming from cached records."""
+      return None
+
    # -------- optional child catalog support -------------------------------
 
    def child_catalogs(self, rows: List[GameRecord]) -> Dict[str, List[GameRecord]]:
