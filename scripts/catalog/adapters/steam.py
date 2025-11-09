@@ -36,8 +36,9 @@ class SteamAdapter(Adapter):
                 **kw):
       if config is None:
          config = AdapterConfig()
-      if config.rps > 2.0:
-         config.rps = 2.0
+      # Steam is sensitive to aggressive polling; enforce ~1 request per 2 seconds.
+      if config.rps > 0.5:
+         config.rps = 0.5
 
       super().__init__(config=config, **kw)
       self.include_types = [t.lower() for t in (include_types or ["game"])]
