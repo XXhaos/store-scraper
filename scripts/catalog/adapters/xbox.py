@@ -139,7 +139,7 @@ class XboxAdapter(Adapter):
       self.endpoints = endpoints or XboxEndpoints(
          browse_api="https://emerald.xboxservices.com/xboxcomfd/browse",
          search_api=(
-            "https://www.xbox.com/xwebapp/UnifiedSearch"
+            "https://www.xbox.com/{path_locale}/xwebapp/UnifiedSearch"
             "?Locale={locale}&Market={country}&Query={query}&Skip={skip}&Take={count}"
          ),
          seed_pages=_default_seed_pages(self.config.country, self.config.locale),
@@ -544,6 +544,7 @@ class XboxAdapter(Adapter):
 
       headers = {"Accept": "application/json"}
       locale = self.config.locale.replace("_", "-").lower()
+      path_locale = self.config.locale.replace("_", "-")
       skip = 0
       while True:
          url = self.endpoints.search_api.format(
@@ -551,6 +552,7 @@ class XboxAdapter(Adapter):
             count=page_size,
             country=self.config.country.upper(),
             locale=locale,
+            path_locale=path_locale,
             skip=skip,
             page=skip // max(1, page_size),
          )
