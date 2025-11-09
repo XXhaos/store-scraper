@@ -30,15 +30,17 @@ Each entry corresponds to a single game and includes metadata fields.
 
 ```json
 [
-    ["The Legend of Zelda: Tears of the Kingdom", {
-        "type": "game",
-        "price": "$69.99",
-        "image": "https://assets.nintendo.com/zelda.jpg",
-        "href": "https://store.nintendo.com/...",
-        "uuid": "ZELDA-TOTK",
-        "platforms": ["Switch"],
-        "rating": "everyone 10+"
-    }]
+    ["The Legend of Zelda: Tears of the Kingdom",
+        {
+            "type": "game",
+            "price": "$69.99",
+            "image": "https://assets.nintendo.com/zelda.jpg",
+            "href": "https://store.nintendo.com/...",
+            "uuid": "ZELDA-TOTK",
+            "platforms": ["Switch"],
+            "rating": "everyone 10+"
+        }
+    ]
 ]
 ```
 
@@ -171,6 +173,7 @@ Outputs will appear as:
 out/
  └─ steam/
     ├─ !.json
+    ├─ $.json
     ├─ _.json
     ├─ a.json
     ├─ b.json
