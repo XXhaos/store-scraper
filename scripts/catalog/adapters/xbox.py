@@ -183,31 +183,30 @@ class XboxAdapter(Adapter):
       assert self.endpoints.browse_api, "browse_api endpoint not configured"
 
       locale = self.config.locale.replace("_", "-")
-      accept_language = f"{locale},en;q=0.9"
       headers = {
-         "Accept": "*/*",
-         "Accept-Language": accept_language,
+         "Accept": "application/json",
          "Content-Type": "application/json",
-         "DNT": "1",
          "Origin": "https://www.xbox.com",
-         "Referer": "https://www.xbox.com/",
+         "Referer": f"https://www.xbox.com/{locale.lower()}/",
          "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/142.0.0.0 Safari/537.36"
+            "Chrome/120.0.0.0 Safari/537.36"
          ),
-         "ms-cv": self._ms_cv,
-         "priority": "u=1, i",
          "x-ms-api-version": "1.1",
-         "xbl-experiments": XBL_EXPERIMENTS_HEADER,
       }
 
-      empty_filters = base64.b64encode(b"{}").decode("utf-8")
+      order_filters = base64.b64encode(json.dumps({
+         "orderby": {
+            "id": "orderby",
+            "choices": [{"id": "Title Asc"}],
+         }
+      }).encode("utf-8")).decode("utf-8")
 
       body = {
-         "Filters": empty_filters,
+         "Filters": order_filters,
          "ReturnFilters": True,
-         "ChannelKeyToBeUsedInResponse": "BROWSE_CHANNELID=_FILTERS=",
+         "ChannelKeyToBeUsedInResponse": "BROWSE_CHANNELID=_FILTERS=ORDERBY=TITLE ASC",
          "ChannelId": "",
       }
 
