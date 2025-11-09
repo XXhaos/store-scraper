@@ -1,6 +1,7 @@
 # Ignore these file-types
 *.txt
 *.db
+*.db-*
 
 # Ignore these folders
 .git/

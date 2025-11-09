@@ -178,7 +178,7 @@ python scripts/crawl.py --stores steam,psn,xbox,nintendo --out ./out
 
 ### Resuming after interruptions
 
-`scripts/crawl.py` caches normalized records to a SQLite database (`catalog-cache.db` by default) so you can restart the crawler after a network outage or reboot without losing progress. Tune the behaviour with:
+`scripts/crawl.py` caches normalized records to a SQLite database (`catalog-cache.db` by default) so you can restart the crawler after a network outage or reboot without losing progress. Tune the behavior with:
 
 * `--cache-db PATH_OR_URL` — choose where the cache is stored (file path or SQLAlchemy URL).
 * `--no-cache` — disable caching for the current run.
@@ -242,10 +242,10 @@ store-scraper/
     │   │   ├─ normalize.py         # title/price/date/platform normalization
     │   │   └─ runner.py            # Orchestrates adapters, validation, writing
     │   │
-    │   └─ crawl.py                 # CLI entrypoint
+    │   └─ crawl.py                 # CLI entry point
     │
     ├─ tests/                       # Pytest tests (fixtures later)
-    ├─ CRAWL.bat                    # CLI entrypoint
+    ├─ CRAWL.bat                    # CLI entry point
     ├─ INSTALL.bat                  # Dependency installer
     ├─ pyproject.toml               # Project dependency file
     ├─ README.md                    # Project overview
