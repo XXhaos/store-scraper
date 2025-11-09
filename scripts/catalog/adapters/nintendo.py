@@ -191,11 +191,16 @@ class NintendoAdapter(Adapter):
          headers["X-Algolia-Api-Key"] = self.endpoints.algolia_api_key
 
       locale_underscore = self.config.locale.replace("-", "_").lower()
+      country_lower = self.config.country.lower()
       index_template = self.endpoints.algolia_index or "ncom_game_en_{country}"
       index_name = index_template.format(
-         country=self.config.country.lower(),
+         country=country_lower,
          locale=locale_underscore,
       )
+      if locale_underscore.endswith(f"_{country_lower}"):
+         dup = f"_{country_lower}_{country_lower}"
+         if dup in index_name:
+            index_name = index_name.replace(dup, f"_{country_lower}")
 
       search_api = self.endpoints.search_api or ""
       if "{index_name}" in search_api or "{index}" in search_api:
