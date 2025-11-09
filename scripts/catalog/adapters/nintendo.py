@@ -3,7 +3,7 @@ import asyncio
 import json
 import re
 from urllib.parse import quote_plus
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import AsyncIterator, Dict, Any, List, Optional
 
 from catalog.adapters.base import Adapter, AdapterConfig, Capabilities
@@ -37,6 +37,76 @@ _NEXT_RE = re.compile(
    re.S | re.I
 )
 
+_ASSET_HOST = "https://assets.nintendo.com"
+
+def _normalize_asset_url(value: Optional[str]) -> Optional[str]:
+   if not value:
+      return value
+   if isinstance(value, str):
+      if value.startswith("http://") or value.startswith("https://"):
+         return value
+      if value.startswith("//"):
+         return f"https:{value}"
+      path = value.lstrip("/")
+      if path.startswith("image/upload/"):
+         return f"{_ASSET_HOST}/{path}"
+      return f"{_ASSET_HOST}/image/upload/{path}"
+   return value
+
+def _extract_price_components(*values: Any) -> tuple[Optional[float], Optional[str], Optional[str]]:
+   amount: Optional[float] = None
+   currency: Optional[str] = None
+   display: Optional[str] = None
+
+   def visit(node: Any):
+      nonlocal amount, currency, display
+      if node is None or (amount is not None and currency is not None and display is not None):
+         return
+      if isinstance(node, bool):
+         return
+      if isinstance(node, (int, float)) and not isinstance(node, bool):
+         if amount is None:
+            amt = float(node)
+            if amt > 1000:
+               amt = amt / 100.0
+            amount = amt
+         return
+      if isinstance(node, str):
+         stripped = node.strip()
+         if not stripped:
+            return
+         try:
+            amt = float(stripped.replace("$", "").replace(",", ""))
+         except ValueError:
+            if display is None:
+               display = stripped
+         else:
+            if amount is None:
+               if amt > 1000:
+                  amt = amt / 100.0
+               amount = amt
+         return
+      if isinstance(node, dict):
+         if currency is None:
+            currency = node.get("currency") or node.get("currencyCode") or node.get("currency_symbol")
+         if display is None:
+            display = node.get("display") or node.get("formatted") or node.get("rawValue") or node.get("priceFormatted")
+         for key in (
+            "finalPrice", "salePrice", "discountPrice", "discounted", "regularPrice", "regPrice",
+            "current", "amount", "raw", "value", "price", "msrp", "final", "basePrice", "usdValue",
+         ):
+            if key in node:
+               visit(node.get(key))
+         return
+      if isinstance(node, (list, tuple, set)):
+         for item in node:
+            visit(item)
+
+   for v in values:
+      visit(v)
+
+   return amount, currency, display
+
 @dataclass(slots=True)
 class NintendoEndpoints:
    # Example (fill if you’ve got one for your locale/market):
@@ -45,9 +115,11 @@ class NintendoEndpoints:
    algolia_app_id: Optional[str] = None
    algolia_api_key: Optional[str] = None
    algolia_index: Optional[str] = None
+   algolia_filters: Optional[str] = None
+   algolia_additional_params: Dict[str, Any] = field(default_factory=dict)
 
    # Listing pages that contain many products (per locale)
-   seed_pages: List[str] = None
+   seed_pages: Optional[List[str]] = None
 
 def _default_seed_pages(country: str, locale: str) -> List[str]:
    # nintendo.com often uses paths like /en-us/store/games/
@@ -73,10 +145,21 @@ class NintendoAdapter(Adapter):
                 endpoints: NintendoEndpoints | None = None, **kw):
       super().__init__(config=config, **kw)
       self.endpoints = endpoints or NintendoEndpoints(
-         search_api="https://u3b6gr4ua3-dsn.algolia.net/1/indexes/*/queries",
+         search_api="https://u3b6gr4ua3-1.algolianet.com/1/indexes/{index_name}/query",
          algolia_app_id="U3B6GR4UA3",
-         algolia_api_key="9a2c7a43f1f6c9616bf1b9d5f3fa0c6e",
-         algolia_index="ncom_game_en_{country}",
+         algolia_api_key="a29c6927638bfd8cee23993e51e721c9",
+         algolia_index="store_game_{locale}_{country}_release_des",
+         algolia_filters="NOT \"contentDescriptors.label\":\"Partial Nudity\" AND NOT \"contentDescriptors.label\":\"Nudity\"",
+         algolia_additional_params={
+            "analytics": True,
+            "facetingAfterDistinct": True,
+            "clickAnalytics": True,
+            "highlightPreTag": "^*^^",
+            "highlightPostTag": "^*",
+            "attributesToHighlight": ["description"],
+            "facets": ["*"],
+            "maxValuesPerFacet": 100,
+         },
          seed_pages=_default_seed_pages(self.config.country, self.config.locale),
       )
 
@@ -102,35 +185,40 @@ class NintendoAdapter(Adapter):
       assert self.endpoints.search_api, "search_api endpoint template not configured"
 
       headers = {"Accept": "application/json"}
-      if self.endpoints.algolia_app_id and self.endpoints.algolia_api_key:
-         headers.update({
-            "X-Algolia-Application-Id": self.endpoints.algolia_app_id,
-            "X-Algolia-API-Key": self.endpoints.algolia_api_key,
-         })
+      if self.endpoints.algolia_app_id:
+         headers["X-Algolia-Application-Id"] = self.endpoints.algolia_app_id
+      if self.endpoints.algolia_api_key:
+         headers["X-Algolia-Api-Key"] = self.endpoints.algolia_api_key
 
-      locale = self.config.locale.replace("_", "-").lower()
+      locale_underscore = self.config.locale.replace("-", "_").lower()
       index_template = self.endpoints.algolia_index or "ncom_game_en_{country}"
-      index_name = index_template.format(country=self.config.country.lower(), locale=locale)
+      index_name = index_template.format(
+         country=self.config.country.lower(),
+         locale=locale_underscore,
+      )
+
+      search_api = self.endpoints.search_api or ""
+      if "{index_name}" in search_api or "{index}" in search_api:
+         search_api = search_api.format(index=index_name, index_name=index_name)
+      using_queries = search_api.endswith("/queries")
 
       page = 0
       while True:
-         params = {
-            "query": quote_plus(query),
-            "hitsPerPage": str(page_size),
-            "page": str(page),
-         }
-        
-         payload = {
-            "requests": [
-               {
-                  "indexName": index_name,
-                  "params": "&".join(f"{k}={v}" for k, v in params.items()),
-               }
-            ]
-         }
-
-         if self.endpoints.search_api.endswith("/queries"):
-            resp = await self.request("POST", self.endpoints.search_api, json=payload, headers=headers)
+         if using_queries:
+            params = {
+               "query": query,
+               "hitsPerPage": str(page_size),
+               "page": str(page),
+            }
+            payload = {
+               "requests": [
+                  {
+                     "indexName": index_name,
+                     "params": "&".join(f"{k}={quote_plus(v)}" for k, v in params.items()),
+                  }
+               ]
+            }
+            resp = await self.request("POST", search_api, json=payload, headers=headers)
             js = resp.json()
             results = (js.get("results") or [])
             if results:
@@ -140,19 +228,23 @@ class NintendoAdapter(Adapter):
                items = []
                nb_pages = None
          else:
-            js = await self.get_json(self.endpoints.search_api.format(
-               query=query,
-               count=page_size,
-               country=self.config.country,
-               locale=self.config.locale,
-               page=page,
-            ), headers=headers)
-            items = self._extract_items_from_api(js)
-            nb_pages = None
+            payload = {
+               "query": query,
+               "hitsPerPage": page_size,
+               "page": page,
+            }
+            if self.endpoints.algolia_filters:
+               payload["filters"] = self.endpoints.algolia_filters
+            if self.endpoints.algolia_additional_params:
+               payload.update(self.endpoints.algolia_additional_params)
+            resp = await self.request("POST", search_api, json=payload, headers=headers)
+            js = resp.json()
+            items = js.get("hits") or []
+            nb_pages = js.get("nbPages")
 
          count = 0
          for it in items:
-            coalesced = self._coerce_algolia_hit(it) if self.endpoints.search_api.endswith("/queries") else it
+            coalesced = self._coerce_algolia_hit(it)
             rec = self._normalize_api_item(coalesced)
             if rec:
                count += 1
@@ -192,7 +284,8 @@ class NintendoAdapter(Adapter):
 
       # Image fields: hero, boxArt, imageUrl, keyImages[]
       image = (
-         it.get("image") or it.get("imageUrl") or it.get("boxArt") or it.get("heroBanner")
+         it.get("image") or it.get("imageUrl") or it.get("boxArt") or it.get("heroBanner") or
+         it.get("productImage") or it.get("productImageSquare")
       )
       if not image:
          imgs = it.get("images") or it.get("keyImages") or []
@@ -208,7 +301,7 @@ class NintendoAdapter(Adapter):
                   if preferred:
                      break
             image = preferred or (imgs[0].get("url") if isinstance(imgs[0], dict) else imgs[0])
-      image = str(image) if image else "https://www.nintendo.com/etc.clientlibs/ncom/clientlibs/clientlib-ncom/resources/img/nintendo_red.svg"
+      image = _normalize_asset_url(str(image)) if image else "https://www.nintendo.com/etc.clientlibs/ncom/clientlibs/clientlib-ncom/resources/img/nintendo_red.svg"
 
       # Href: product page URL (or build from slug/nsuid)
       href = (
@@ -224,6 +317,14 @@ class NintendoAdapter(Adapter):
             href = f"https://www.nintendo.com/{loc}/store/products/{nsuid}/"
          else:
             href = f"https://www.nintendo.com/{loc}/store/"
+
+      if href and isinstance(href, str):
+         if href.startswith("//"):
+            href = f"https:{href}"
+         elif href.startswith("/"):
+            href = f"https://www.nintendo.com{href}"
+         elif href.startswith("store/"):
+            href = f"https://www.nintendo.com/{href}"
 
       # Price normalization
       # We prefer display strings when Nintendo provides them ("Free", "$59.99", etc.).
@@ -243,10 +344,23 @@ class NintendoAdapter(Adapter):
          except Exception:
             amount = None
          currency = price_obj.get("currency") or price_obj.get("currencyCode")
+      eshop_details = it.get("eshopDetails") if isinstance(it.get("eshopDetails"), dict) else {}
+      if isinstance(price_obj, dict):
+         amt_guess, cur_guess, disp_guess = _extract_price_components(price_obj, eshop_details)
+         amount = amount or amt_guess
+         currency = currency or cur_guess
+         if not isinstance(display, string_types()) and disp_guess:
+            display = disp_guess
+      if not isinstance(display, string_types()) and isinstance(eshop_details, dict):
+         maybe_flag = eshop_details.get("goldPointOfferType")
+         if maybe_flag:
+            display = maybe_flag
       price_str = display if isinstance(display, string_types()) else price_to_string(amount, currency)
 
       # Platforms: almost always "Switch" for Nintendo store data
-      platforms = it.get("platforms") or []
+      platforms = it.get("platforms") or it.get("platform") or []
+      if isinstance(platforms, str):
+         platforms = [platforms]
       if not platforms:
          platforms = ["Switch"]
       platforms = normalize_platforms(platforms)
@@ -363,39 +477,34 @@ class NintendoAdapter(Adapter):
          return {}
       guess: Dict[str, Any] = {}
 
+      slug = hit.get("slug") or hit.get("urlKey")
+      if slug:
+         guess.setdefault("slug", slug)
+
       guess["title"] = hit.get("title") or hit.get("name") or hit.get("productTitle") or ""
       guess["nsuid"] = hit.get("nsuid") or hit.get("id") or hit.get("productId")
-      if hit.get("slug"):
-         guess.setdefault("slug", hit.get("slug"))
 
-      image = hit.get("boxArt") or hit.get("heroBanner") or hit.get("image")
+      image = (
+         hit.get("boxArt") or hit.get("heroBanner") or hit.get("image") or
+         hit.get("productImage") or hit.get("productImageSquare")
+      )
       if image:
-         guess["image"] = image
+         guess["image"] = _normalize_asset_url(str(image))
 
       link = hit.get("url") or hit.get("productUrl")
-      if not link and hit.get("slug"):
+      if not link and slug:
          loc = self.config.locale.replace("_", "-").lower()
-         link = f"https://www.nintendo.com/{loc}/store/products/{hit['slug']}/"
+         link = f"https://www.nintendo.com/{loc}/store/products/{slug}/"
       guess["productUrl"] = link or None
 
       price = hit.get("price") or hit.get("prices") or {}
-      if isinstance(price, dict):
-         amount = price.get("discounted") or price.get("current") or price.get("regular") or price.get("amount")
-         if amount is None and "raw" in price and isinstance(price["raw"], dict):
-            raw = price["raw"]
-            amount = raw.get("discounted") or raw.get("current") or raw.get("regular")
-         currency = price.get("currency") or price.get("currencyCode")
-         if isinstance(amount, (int, float)) and amount > 1000:
-            amount = float(amount) / 100.0
-         guess["price"] = {"amount": amount, "currency": currency}
-         display = price.get("display") or price.get("formatted") or price.get("rawValue")
-         if display:
-            guess["displayPrice"] = display
-      elif isinstance(price, (int, float)):
-         amt = float(price)
-         if amt > 1000:
-            amt = amt / 100.0
-         guess["price"] = {"amount": amt, "currency": hit.get("currency")}
+      eshop_details = hit.get("eshopDetails") if isinstance(hit.get("eshopDetails"), dict) else {}
+      amt, cur, disp = _extract_price_components(price, eshop_details)
+      currency = cur or (price.get("currency") if isinstance(price, dict) else None) or hit.get("currency") or hit.get("currencyCode")
+      if amt is not None or currency:
+         guess["price"] = {"amount": amt, "currency": currency}
+      if disp:
+         guess["displayPrice"] = disp
       elif isinstance(price, str):
          guess["displayPrice"] = price
 
@@ -403,13 +512,15 @@ class NintendoAdapter(Adapter):
       if display_price and "displayPrice" not in guess:
          guess["displayPrice"] = display_price
 
-      plats = hit.get("platforms") or hit.get("platform")
+      plats = hit.get("platforms") or hit.get("platform") or hit.get("corePlatforms")
       if isinstance(plats, list):
          guess["platforms"] = normalize_platforms(plats)
       elif isinstance(plats, str):
          guess["platforms"] = normalize_platforms([plats])
 
-      rating = hit.get("rating") or hit.get("esrb") or hit.get("ageRating")
+      rating = hit.get("rating") or hit.get("esrb") or hit.get("ageRating") or hit.get("contentRating")
+      if isinstance(rating, dict):
+         rating = rating.get("label") or rating.get("code")
       if rating:
          guess["ratings"] = rating
 

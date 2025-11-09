@@ -36,8 +36,8 @@ class SteamAdapter(Adapter):
                 **kw):
       if config is None:
          config = AdapterConfig()
-      if config.rps > 0.5:
-         config.rps = 0.5
+      if config.rps > 2.0:
+         config.rps = 2.0
 
       super().__init__(config=config, **kw)
       self.include_types = [t.lower() for t in (include_types or ["game"])]
