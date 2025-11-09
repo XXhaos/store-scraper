@@ -76,7 +76,7 @@ class PSNAdapter(Adapter):
    # ---------- public contract ----------
 
    async def iter_games(self) -> AsyncIterator[GameRecord]:
-      seen: Set[str | tuple[str, str]] = set()
+      seen: Set[str] = set()
       discovered_category_ids: Set[str] = set(self.endpoints.category_ids or [])
 
       # Strategy A: GraphQL category grids (if ids are known up-front)
@@ -114,14 +114,15 @@ class PSNAdapter(Adapter):
                yield rec
          await asyncio.sleep(0.1)
 
-   def _mark_seen(self, rec: GameRecord, seen: Set[str | tuple[str, str]]) -> bool:
-      key: str | tuple[str, str]
-      if rec.uuid:
-         key = rec.uuid
-      elif rec.href:
-         key = rec.href
-      else:
-         key = (rec.name, rec.store)
+   def _mark_seen(self, rec: GameRecord, seen: Set[str]) -> bool:
+      candidates = (
+         rec.uuid,
+         rec.href,
+         rec.name and f"{rec.store}:{rec.name}",
+      )
+      key = next((value for value in map(lambda candidate: candidate, candidates) if value), None)
+      if key is None:
+         return True
       if key in seen:
          return False
       seen.add(key)

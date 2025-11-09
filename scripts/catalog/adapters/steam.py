@@ -58,6 +58,7 @@ class SteamAdapter(Adapter):
          appids = self._extract_featured_appids(featured, self.buckets)
 
       # Step 2: hydrate via appdetails (region-aware pricing via cc)
+      seen: Set[str] = set()
       for appid in appids:
          if self.skip_appid(appid):
             continue
@@ -68,6 +69,11 @@ class SteamAdapter(Adapter):
 
          rec = self._normalize_app(appid, data)
          if rec:
+            key = self._record_key(rec)
+            if key and key in seen:
+               continue
+            if key:
+               seen.add(key)
             yield rec
          await asyncio.sleep(0.05)  # polite jitter between app calls
 
@@ -116,6 +122,14 @@ class SteamAdapter(Adapter):
       # de-dup while preserving order
       seen = set()
       return [a for a in ids if not (a in seen or seen.add(a))]
+
+   def _record_key(self, rec: GameRecord) -> Optional[str]:
+      candidates = (
+         rec.uuid,
+         rec.href,
+         rec.name and f"{rec.store}:{rec.name}",
+      )
+      return next((value for value in map(lambda candidate: candidate, candidates) if value), None)
 
    async def _fetch_appdetails(self, appid: str) -> Optional[Dict[str, Any]]:
       js = await self.get_json(

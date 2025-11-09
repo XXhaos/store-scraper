@@ -176,8 +176,13 @@ class XboxAdapter(Adapter):
          await asyncio.sleep(0.2)
 
    def _mark_seen(self, rec: GameRecord, seen: Set[str]) -> bool:
-      key = rec.uuid or rec.href or rec.name
-      if not key:
+      candidates = (
+         rec.uuid,
+         rec.href,
+         rec.name and f"{rec.store}:{rec.name}",
+      )
+      key = next((value for value in map(lambda candidate: candidate, candidates) if value), None)
+      if key is None:
          return True
       if key in seen:
          return False
