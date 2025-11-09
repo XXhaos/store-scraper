@@ -30,6 +30,58 @@ from catalog.http import DomainLimiter
 
 XBOX_LIMIT = DomainLimiter(2.0)
 
+XBL_EXPERIMENTS_HEADER = (
+   "enableuhfcache,forcerefreshexp,forceservernav,enableaamscript,"
+   "enableserversideuserfeatureassignments,enableserverauthv3,aatest9010,"
+   "aatestdevice9010,aatest_50_50,aa_test_device_50_50,autofullscreenpersist,"
+   "disablexgp,enableaapaddfriendstream,enableaapmultiplayertitle,"
+   "enableaapscreentimestream,enableabsolutemouse,enableaccountlinking,"
+   "enableachievements,enableanontelemetry,enableaskaparentaddfriend,"
+   "enableaskaparentcontent,enableaskaparentscreentime,enableauthv2ew,"
+   "enableauthv2ewtizen,enablebundlebuilderadobelaunch,enablebuynowdynamicmeparams,"
+   "enablebuynowxboxuiexp,enablebyog,enablebyogpurchase,"
+   "enablecartcheckoutdynamicparams,enablecartmoraystyling,"
+   "enablecelestiaxboxcom,enablechangegamertag,enablechatimageupload,"
+   "enableclientauthv3,enableclientguide,enableclientguideinstream,"
+   "enableclientrenderedcursor,enablecomingsoonupsell,enableconsoles,"
+   "enablecontextualstorebrowse,enablecontrollerstatusv2,"
+   "enabledefaultultimateupsell,enabledisconnectwarning,"
+   "enableenhancedreportareview,enablefeedbacksdk,enablefriendlinksharing,"
+   "enablefriendsandfollowers,enablegameinvites,enablegarrisoninlineredeem,"
+   "enablegtaplus,enableguestcheckout,enableguidechattab,enableguidehometab,"
+   "enableguidenotifications,enableguideprofiletab,enableiapbrowseexperience,"
+   "enableinternalcookielist,enablejanus,enablejanusxboxcom,enablelaunchpad,"
+   "enableleavingdate,enableloginsagafix,enablemaunaloa,enablemecontrolgamerscore,"
+   "enablemecontrolpresence,enablemediaplayonweb,enablemessagesafetysettings,"
+   "enablemiconmacsafari,enableminipdprefreshexp,enablemouseandkeyboard,"
+   "enablemulticloudplaybutton,enablemultiupsellbutton,"
+   "enablemutualfriendsprivacysettings,enablenakatomi,enablenakatomiu,"
+   "enablenetqualityindicator,enablenewsearchexperience,enablenewsearchgeneraltab,"
+   "enableoffersandcredits,enableopenendedgameinvites,enableoverridedevsettings,"
+   "enableparties,enablepdpgallery,enablepidlstandarizedforms,"
+   "enableplaypathnavigation,enableplaywithfriendsrow,"
+   "enablepresenceheartbeat,enableprivacycontrols,enableprovisioningupsell,"
+   "enablereactcheckout,enablereactgiftflow,enablereactredeem,"
+   "enablerealnamesharing,enableredeemcodemodal,enableremoteplay,"
+   "enablesearchpagev2,enablesearchpromo,enablesenerchia,enablesessiontime,"
+   "enablesiglv3,enableskipactivatestoreexp,enablestorebyog,"
+   "enablestreamstatistics,enabletakcontrolresizing,"
+   "enabletakhighcontrastmode,enabletitanautorenewtoggle,"
+   "enabletitanredeemsubs,enabletitleactivation,enabletvautosignout,"
+   "enabletvgamepassupsellv2,enabletvlayerhint,enableubisoftpcversionlegaltext,"
+   "enableubisoftplusdata,enableusbguidance,enableuseretryafterheader,"
+   "enableuserprofilepage,enableuserstoragemenu,enablewishlistgifting,"
+   "enablexboxapponmobilegooglepay,enablexboxcomnewui,"
+   "enablexboxcomredeemhostnor,enablexboxgamepadlite,"
+   "enablexboxonerfaccountsettings,enablexboxonerfsetupredirectpage,"
+   "enablexboxsmallpurchasedialog,enablexcloudxboxcardredeem,"
+   "enablexesurveys,enablexsearch,enablextracetelemetry,hidebetareferences,"
+   "purchasesdkcartcheckout,randomizeentitlementquery,showmousekeyboardsetting,"
+   "skipredirectcounter,testautomaticxboxwebexpscorecard,testf2paaforeverrunnig,"
+   "test_flight_7_11_752,uselocalorigininvitelinks,usepostmessagehelper,"
+   "usetizenh264mainsdphack,usev2msaxblauth,xwsrmdevaa90"
+)
+
 _JSONLD_RE = re.compile(
    r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
    re.S | re.I
@@ -89,6 +141,7 @@ class XboxAdapter(Adapter):
          ),
          seed_pages=_default_seed_pages(self.config.country, self.config.locale),
       )
+      self._ms_cv = "store-scraper.0"
 
    async def iter_games(self) -> AsyncIterator[GameRecord]:
       seen: Set[str] = set()
