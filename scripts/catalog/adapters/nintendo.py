@@ -4,7 +4,7 @@ import json
 import re
 from urllib.parse import quote_plus
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Dict, Any, List, Optional
+from typing import AsyncIterator, Dict, Any, List, Optional, Set
 
 from catalog.adapters.base import Adapter, AdapterConfig, Capabilities
 from catalog.models import GameRecord
@@ -164,20 +164,40 @@ class NintendoAdapter(Adapter):
       )
 
    async def iter_games(self) -> AsyncIterator[GameRecord]:
+      seen: Set[str] = set()
+
       # Strategy A: JSON search (optional)
       if self.endpoints.search_api:
          for ch in "abcdefghijklmnopqrstuvwxyz":
             async for rec in self._iter_search_api(query=ch, page_size=60):
                if rec:
+                  key = self._record_key(rec)
+                  if key and key in seen:
+                     continue
+                  if key:
+                     seen.add(key)
                   yield rec
-            await asyncio.sleep(0.1)
+         await asyncio.sleep(0.1)
 
       # Strategy B: Listing pages with embedded JSON
       for url in self.endpoints.seed_pages or []:
          async for rec in self._iter_list_page(url):
             if rec:
+               key = self._record_key(rec)
+               if key and key in seen:
+                  continue
+               if key:
+                  seen.add(key)
                yield rec
          await asyncio.sleep(0.2)
+
+   def _record_key(self, rec: GameRecord) -> Optional[str]:
+      candidates = (
+         rec.uuid,
+         rec.href,
+         rec.name and f"{rec.store}:{rec.name}",
+      )
+      return next((value for value in map(lambda candidate: candidate, candidates) if value), None)
 
    # ---------- Strategy A: JSON search API (optional) ----------
 

@@ -40,12 +40,13 @@ def write_catalog(out_dir: str, store: str, rows: Iterable[GameRecord]) -> None:
       with open(os.path.join(base, f"{k}.json"), "w", encoding="utf-8") as fp:
          json.dump([i.model_dump(mode="json") for i in arr], fp, ensure_ascii=False, indent=4)
 
-   # Write bang file
+   # Write metadata and bang files
    metadata = {
       "size": len(bang),
       "date": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
    }
-   bang_with_metadata: List[Tuple[str, dict]] = [("", metadata), *bang]
+   with open(os.path.join(base, "$.json"), "w", encoding="utf-8") as fp:
+      json.dump(metadata, fp, ensure_ascii=False, indent=4)
 
    with open(os.path.join(base, "!.json"), "w", encoding="utf-8") as fp:
-      json.dump(bang_with_metadata, fp, ensure_ascii=False, indent=4)
+      json.dump(bang, fp, ensure_ascii=False, indent=4)
