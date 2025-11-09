@@ -30,7 +30,15 @@ async def fetch(client: httpx.AsyncClient, method: str, url: str, *,
       if limiter:
          await limiter.wait()
       try:
-         r = await client.request(method, url, params=params, headers=headers, json=json, data=data)
+         r = await client.request(
+            method,
+            url,
+            params=params,
+            headers=headers,
+            json=json,
+            data=data,
+            follow_redirects=True,
+         )
          if r.status_code in RETRYABLE:
             attempt += 1
             if attempt > max_retries:
