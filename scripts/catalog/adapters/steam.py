@@ -1,13 +1,15 @@
 from __future__ import annotations
 import asyncio
+import os
 from typing import AsyncIterator, Dict, Any, List, Optional
 
 from catalog.adapters.base import Adapter, AdapterConfig, Capabilities
 from catalog.models import GameRecord
 from catalog.normalize import clean_title, strip_edition_noise, price_to_string
 
-API_FEATURED = "https://store.steampowered.com/api/featuredcategories"
-API_DETAILS  = "https://store.steampowered.com/api/appdetails"
+API_FEATURED  = "https://store.steampowered.com/api/featuredcategories"
+API_DETAILS   = "https://store.steampowered.com/api/appdetails"
+API_APP_LIST  = "http://api.steampowered.com/ISteamApps/GetAppList/v0002/"
 
 class SteamAdapter(Adapter):
    """
@@ -28,15 +30,22 @@ class SteamAdapter(Adapter):
    def __init__(self, *, config: AdapterConfig | None = None,
                 include_types: Optional[List[str]] = None,  # e.g., ["game","dlc"]
                 buckets: Optional[List[str]] = None,        # override featured buckets
+                app_list_url: Optional[str] = None,
+                api_key: Optional[str] = None,
                 **kw):
       super().__init__(config=config, **kw)
       self.include_types = [t.lower() for t in (include_types or ["game"])]
       self.buckets = buckets or ["coming_soon", "specials", "top_sellers", "new_releases"]
+      self._app_list_url = app_list_url or API_APP_LIST
+      # allow passing via ctor or environment; empty string treated as absent
+      self._api_key = (api_key if api_key is not None else os.getenv("STEAM_API_KEY")) or None
 
    async def iter_games(self) -> AsyncIterator[GameRecord]:
-      # Step 1: seed appids from featured categories
-      featured = await self.get_json(API_FEATURED, params={"l": "english"})
-      appids = self._extract_featured_appids(featured, self.buckets)
+      # Step 1: seed appids from the global Steam app list, fallback to featured categories
+      appids = await self._fetch_app_list_ids()
+      if not appids:
+         featured = await self.get_json(API_FEATURED, params={"l": "english"})
+         appids = self._extract_featured_appids(featured, self.buckets)
 
       # Step 2: hydrate via appdetails (region-aware pricing via cc)
       for appid in appids:
@@ -50,6 +59,30 @@ class SteamAdapter(Adapter):
          await asyncio.sleep(0.05)  # polite jitter between app calls
 
    # ---------------- helpers ----------------
+
+   async def _fetch_app_list_ids(self) -> List[str]:
+      params = {"format": "json"}
+      if self._api_key:
+         params["key"] = self._api_key
+
+      try:
+         js = await self.get_json(self._app_list_url, params=params)
+      except Exception:
+         return []
+
+      apps = (((js.get("applist") or {}).get("apps")) or [])
+      ids: List[str] = []
+      seen: set[str] = set()
+      for entry in apps:
+         appid = entry.get("appid")
+         if not isinstance(appid, int):
+            continue
+         appid_str = str(appid)
+         if appid_str in seen:
+            continue
+         seen.add(appid_str)
+         ids.append(appid_str)
+      return ids
 
    def _extract_featured_appids(self, featured: Dict[str, Any], buckets: List[str]) -> List[str]:
       ids: List[str] = []
