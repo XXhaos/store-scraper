@@ -4,10 +4,10 @@ This project is used to update the databases used by [Game Store Catalog](https:
 
 ### Supported Stores
 
-* Steam
-* PlayStation Network (PSN)
-* Xbox Store
-* Nintendo eShop
+* Steam — Updates take **days** to complete
+* PlayStation Network (PSN) — Updates take ≤ 15min
+* Xbox Store — Updates take ≤ 15min
+* Nintendo eShop — Updates take ≤ 15min
 
 ### Purpose
 
@@ -63,6 +63,20 @@ Each file is an array of simple objects used for alphabetical browsing.
 ]
 ```
 
+### 3. Metadata Files: `$.json`
+
+A file hosting minimal metadata about the update/files.
+
+**Example:**
+
+```json
+{
+    "size": 12815,
+    "date": "2025-11-09T03:18:32.207Z",
+    "new": -1137
+}
+```
+
 ---
 
 ## Architecture
@@ -86,6 +100,7 @@ Adapters yield normalized `GameRecord` objects that match the schema above.
 
 * **models.py** — Defines the canonical data model.
 * **normalize.py** — Cleans and formats raw fields.
+* **ingest.py** — Merges and formats databases.
 * **http.py** — Handles throttled, retried HTTP requests.
 * **io_writer.py** — Writes normalized JSON output (bang and per-letter files).
 * **runner.py** — Orchestrates multiple adapters and output pipelines.
@@ -120,6 +135,21 @@ It exports data that exactly matches the JSON produced by the original project.
 * `httpx`, `pydantic`, `aiolimiter`, `tenacity`
 
 ### Quick Start
+
+#### Option 1 — Run `INSTALL.bat`
+
+```bash
+# Install dependencies automatically
+INSTALL
+
+# Run a single store (Steam)
+crawl.bat --stores steam --out ./out --country US --locale en-US
+
+# Run multiple stores
+crawl.bat --stores steam,psn,xbox,nintendo --out ./out
+```
+
+#### Option 2 — Manage a Virtual Environment
 
 ```bash
 # Create a virtual environment
@@ -170,22 +200,35 @@ out/
 ## Example Project Layout
 
 ```
-game-catalog-py/
- ├─ catalog/
- │   ├─ models.py
- │   ├─ normalize.py
- │   ├─ http.py
- │   ├─ io_writer.py
- │   ├─ adapters/
- │   │   ├─ steam.py
- │   │   ├─ psn.py
- │   │   ├─ xbox.py
- │   │   └─ nintendo.py
- │   └─ runner.py
- ├─ scripts/
- │   └─ crawl.py
- ├─ tests/
- └─ README.md
+store-scraper/
+    ├─ scripts/
+    │   ├─ catalog/
+    │   │   ├─ adapters/
+    │   │   │   ├─ __init__.py
+    │   │   │   ├─ base.py          # Adapter interface
+    │   │   │   ├─ nintendo.py      # Working Adapter (Nintendo)
+    │   │   │   ├─ psn.py           # Working Adapter (PlayStation)
+    │   │   │   ├─ steam.py         # Working Adapter (Steam)
+    │   │   │   └─ xbox.py          # Working Adapter (Xbox)
+    │   │   │
+    │   │   ├─ __init__.py
+    │   │   ├─ db.py                # Database (SQL) handler
+    │   │   ├─ dedupe.py            # optional cross-store clustering (title/year/publisher)
+    │   │   ├─ http.py              # resilient HTTP (rate limit, retries, backoff)
+    │   │   ├─ ingest.py            # staging/merge helpers (SQLite/Postgres optional)
+    │   │   ├─ io_writer.py         # writes !.json and a..z/_.json in your exact format
+    │   │   ├─ models.py            # Pydantic models that mirror the JSON schema
+    │   │   ├─ normalize.py         # title/price/date/platform normalization
+    │   │   └─ runner.py            # Orchestrates adapters, validation, writing
+    │   │
+    │   └─ crawl.py                 # CLI entrypoint
+    │
+    ├─ tests/                       # Pytest tests (fixtures later)
+    ├─ CRAWL.bat                    # CLI entrypoint
+    ├─ INSTALL.bat                  # Dependency installer
+    ├─ pyproject.toml               # Project dependency file
+    ├─ README.md                    # Project overview
+    └─ SCHEMA.md                    # This file, project outline
 ```
 
 ---
