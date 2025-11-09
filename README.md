@@ -30,15 +30,19 @@ Each entry corresponds to a single game and includes metadata fields.
 
 ```json
 [
-    ["The Legend of Zelda: Tears of the Kingdom",
+    [
+        "A Bibelot: Tiret sur Will",
         {
+            "name": "A Bibelot: Tiret sur Will",
             "type": "game",
-            "price": "$69.99",
-            "image": "https://assets.nintendo.com/zelda.jpg",
-            "href": "https://store.nintendo.com/...",
-            "uuid": "ZELDA-TOTK",
-            "platforms": ["Switch"],
-            "rating": "everyone 10+"
+            "price": "$2.49",
+            "image": "https://assets.nintendo.com/image/upload/store/software/switch/70010000097038/7504a19b54adc8b3ac9bb09d71a4c0b9bb5d56baa8522149051c880c9616ec42",
+            "href": "https://www.nintendo.com/us/store/products/a-bibelot-tiret-sur-will-switch/",
+            "uuid": "70010000097038",
+            "platforms": [
+                "Switch"
+            ],
+            "rating": "everyone"
         }
     ]
 ]
@@ -53,14 +57,16 @@ Each file is an array of simple objects used for alphabetical browsing.
 ```json
 [
     {
-        "name": "A Plague Tale: Requiem",
+        "name": "A Bibelot: Tiret sur Will",
         "type": "game",
-        "price": "$49.99",
-        "image": "https://cdn.store.steamstatic.com/...jpg",
-        "href": "https://store.steampowered.com/app/1182900/",
-        "uuid": "1182900",
-        "platforms": ["Windows", "PS5", "Xbox Series X"],
-        "rating": "mature 17+"
+        "price": "$2.49",
+        "image": "https://assets.nintendo.com/image/upload/store/software/switch/70010000097038/7504a19b54adc8b3ac9bb09d71a4c0b9bb5d56baa8522149051c880c9616ec42",
+        "href": "https://www.nintendo.com/us/store/products/a-bibelot-tiret-sur-will-switch/",
+        "uuid": "70010000097038",
+        "platforms": [
+            "Switch"
+        ],
+        "rating": "everyone"
     }
 ]
 ```
