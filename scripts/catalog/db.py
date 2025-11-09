@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import time
 from typing import List, Sequence
 
 from sqlalchemy import (
@@ -17,6 +18,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
+from sqlalchemy.exc import OperationalError
 
 from catalog.models import GameRecord
 
@@ -139,7 +141,21 @@ class CatalogCache:
 
    def flush(self) -> None:
       if self._pending_writes or self._session.new or self._session.dirty:
-         self._session.commit()
+         retries = 5
+         delay = 0.1
+         for attempt in range(retries):
+            try:
+               self._session.commit()
+               break
+            except OperationalError as exc:
+               message = str(exc).lower()
+               if "database is locked" not in message:
+                  raise
+               self._session.rollback()
+               if attempt == retries - 1:
+                  raise
+               time.sleep(delay)
+               delay *= 2
       self._pending_writes = 0
 
    def close(self) -> None:
