@@ -1,10 +1,11 @@
 from __future__ import annotations
 import asyncio
+import base64
 import json
 import re
 from urllib.parse import quote_plus, urlparse, parse_qs
 from dataclasses import dataclass
-from typing import AsyncIterator, Dict, Any, List, Optional
+from typing import AsyncIterator, Dict, Any, Iterable, List, Optional, Set
 
 from catalog.adapters.base import Adapter, AdapterConfig, Capabilities
 from catalog.models import GameRecord
@@ -50,12 +51,16 @@ _WININIT_RE = re.compile(
 
 @dataclass(slots=True)
 class XboxEndpoints:
+   # Public browse endpoint surfaced by emerald.xboxservices.com. Accepts POST with
+   # optional continuation tokens.
+   browse_api: Optional[str] = None
+
    # If you have an internal/regionally-available search API, put a template here:
    # e.g., "https://www.xbox.com/api/search?query={query}&count={count}&market={country}&locale={locale}&page={page}"
    search_api: Optional[str] = None
 
    # Listing pages to parse (these should list many products)
-   seed_pages: List[str] = None
+   seed_pages: List[str] | None = None
 
 def _default_seed_pages(country: str, locale: str) -> List[str]:
    # xbox.com uses 'en-us' style; normalize locale to that
@@ -77,6 +82,7 @@ class XboxAdapter(Adapter):
                 endpoints: XboxEndpoints | None = None, **kw):
       super().__init__(config=config, **kw)
       self.endpoints = endpoints or XboxEndpoints(
+         browse_api="https://emerald.xboxservices.com/xboxcomfd/browse",
          search_api=(
             "https://www.xbox.com/xwebapp/UnifiedSearch"
             "?Locale={locale}&Market={country}&Query={query}&Skip={skip}&Take={count}"
@@ -85,20 +91,251 @@ class XboxAdapter(Adapter):
       )
 
    async def iter_games(self) -> AsyncIterator[GameRecord]:
+      seen: Set[str] = set()
+
+      # Strategy A: emerald browse API (preferred)
+      if self.endpoints.browse_api:
+         async for rec in self._iter_browse_api():
+            if rec and self._mark_seen(rec, seen):
+               yield rec
+         await asyncio.sleep(0.1)
+
       # Strategy A: JSON API (optional)
       if self.endpoints.search_api:
          for ch in "abcdefghijklmnopqrstuvwxyz":
             async for rec in self._iter_search_api(query=ch, page_size=60):
-               if rec:
+               if rec and self._mark_seen(rec, seen):
                   yield rec
             await asyncio.sleep(0.1)
 
       # Strategy B: Listing pages with embedded JSON
       for url in self.endpoints.seed_pages or []:
          async for rec in self._iter_list_page(url):
-            if rec:
+            if rec and self._mark_seen(rec, seen):
                yield rec
          await asyncio.sleep(0.2)
+
+   def _mark_seen(self, rec: GameRecord, seen: Set[str]) -> bool:
+      key = rec.uuid or rec.href or rec.name
+      if not key:
+         return True
+      if key in seen:
+         return False
+      seen.add(key)
+      return True
+
+   # ---------- Strategy A: emerald browse API ----------
+
+   async def _iter_browse_api(self) -> AsyncIterator[Optional[GameRecord]]:
+      assert self.endpoints.browse_api, "browse_api endpoint not configured"
+
+      locale = self.config.locale.replace("_", "-")
+      headers = {
+         "Accept": "application/json",
+         "Content-Type": "application/json",
+         "Origin": "https://www.xbox.com",
+         "Referer": f"https://www.xbox.com/{locale.lower()}/",
+         "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+         ),
+         "x-ms-api-version": "1.1",
+      }
+
+      order_filters = base64.b64encode(json.dumps({
+         "orderby": {
+            "id": "orderby",
+            "choices": [{"id": "Title Asc"}],
+         }
+      }).encode("utf-8")).decode("utf-8")
+
+      body = {
+         "Filters": order_filters,
+         "ReturnFilters": True,
+         "ChannelKeyToBeUsedInResponse": "BROWSE_CHANNELID=_FILTERS=ORDERBY=TITLE ASC",
+         "ChannelId": "",
+      }
+
+      continuation: Optional[str] = None
+      seen_ids: Set[str] = set()
+
+      while True:
+         payload = dict(body)
+         if continuation:
+            payload["ContinuationToken"] = continuation
+
+         resp = await self.request(
+            "POST",
+            self.endpoints.browse_api,
+            params={"locale": locale},
+            headers=headers,
+            json=payload,
+         )
+         js = resp.json()
+
+         produced = 0
+         for item in self._extract_browse_items(js, seen_ids):
+            rec = self._normalize_browse_item(item)
+            if rec:
+               produced += 1
+               yield rec
+
+         continuation = self._extract_browse_continuation(js)
+         has_more = self._extract_browse_has_more(js)
+         if not continuation or produced == 0 or has_more is False:
+            break
+         await asyncio.sleep(0.05)
+
+   def _extract_browse_items(self, js: Any, seen_ids: Set[str]) -> List[Dict[str, Any]]:
+      items: List[Dict[str, Any]] = []
+
+      def walk(node: Any) -> None:
+         if isinstance(node, dict):
+            pid = node.get("productId") or node.get("ProductId")
+            if pid and (node.get("title") or node.get("Title") or node.get("productFamily")):
+               key = str(pid)
+               if key not in seen_ids:
+                  seen_ids.add(key)
+                  items.append(node)
+            for value in node.values():
+               walk(value)
+         elif isinstance(node, list):
+            for value in node:
+               walk(value)
+
+      walk(js)
+      return items
+
+   def _extract_browse_continuation(self, js: Any) -> Optional[str]:
+      def walk(node: Any) -> Optional[str]:
+         if isinstance(node, dict):
+            for key in ("continuationToken", "ContinuationToken", "nextContinuationToken"):
+               token = node.get(key)
+               if isinstance(token, str) and token:
+                  return token
+            for value in node.values():
+               token = walk(value)
+               if token:
+                  return token
+         elif isinstance(node, list):
+            for value in node:
+               token = walk(value)
+               if token:
+                  return token
+         return None
+
+      return walk(js)
+
+   def _extract_browse_has_more(self, js: Any) -> Optional[bool]:
+      def walk(node: Any) -> Optional[bool]:
+         if isinstance(node, dict):
+            for key in ("hasMore", "HasMore", "hasMoreItems"):
+               if key in node and isinstance(node[key], bool):
+                  return node[key]
+            for value in node.values():
+               flag = walk(value)
+               if flag is not None:
+                  return flag
+         elif isinstance(node, list):
+            for value in node:
+               flag = walk(value)
+               if flag is not None:
+                  return flag
+         return None
+
+      return walk(js)
+
+   def _normalize_browse_item(self, item: Dict[str, Any]) -> Optional[GameRecord]:
+      name = strip_edition_noise(clean_title(
+         item.get("title")
+         or item.get("Title")
+         or item.get("productTitle")
+         or ""
+      ))
+      if not name:
+         return None
+
+      images = item.get("images") or {}
+      image_url = None
+      if isinstance(images, dict):
+         for key in ("superHeroArt", "poster", "boxArt"):
+            img = images.get(key)
+            if isinstance(img, dict) and img.get("url"):
+               image_url = img["url"]
+               break
+      if not image_url:
+         image_url = item.get("imageUrl") or item.get("ImageUrl")
+      if not image_url:
+         image_url = "https://www.xbox.com/etc.clientlibs/settings/wcm/designs/xbox/glyphs/xbox-glyph.png"
+
+      pid = item.get("productId") or item.get("ProductId") or item.get("legacyId")
+      loc = self.config.locale.replace("_", "-").lower()
+      href = item.get("url") or item.get("Url") or (
+         f"https://www.xbox.com/{loc}/games/store/{pid}" if pid else "https://www.xbox.com/"
+      )
+
+      price_obj = item.get("specificPrices") or {}
+      price_entries: Iterable[Dict[str, Any]] = []
+      if isinstance(price_obj, dict):
+         for key in ("purchaseable", "giftable", "price"):
+            if key in price_obj and isinstance(price_obj[key], list) and price_obj[key]:
+               price_entries = price_obj[key]
+               break
+
+      amount = None
+      currency = None
+      price_str: Optional[str] = None
+      for entry in price_entries:
+         currency = entry.get("currency") or entry.get("Currency")
+         raw_amount = entry.get("listPrice") or entry.get("msrp") or entry.get("ListPrice")
+         if raw_amount is None:
+            continue
+         try:
+            amount = float(raw_amount)
+         except Exception:
+            amount = None
+         price_str = price_to_string(amount, currency)
+         if price_str:
+            break
+
+      if not price_str:
+         msrp = item.get("msrp") or item.get("msrpPrice")
+         try:
+            amount = float(msrp) if msrp is not None else None
+         except Exception:
+            amount = None
+         price_str = price_to_string(amount, currency)
+
+      platforms = item.get("availableOn") or []
+      if not isinstance(platforms, list):
+         platforms = [platforms]
+      platforms = normalize_platforms([str(p) for p in platforms if p])
+
+      rating_info = item.get("contentRating") or {}
+      raw_rating = None
+      if isinstance(rating_info, dict):
+         raw_rating = (
+            rating_info.get("rating")
+            or rating_info.get("ratingDescription")
+            or rating_info.get("description")
+         )
+      rating = normalize_rating(raw_rating)
+
+      product_kind = item.get("productKind") or item.get("productFamily") or "game"
+      product_type = str(product_kind).lower() if product_kind else "game"
+
+      return GameRecord(
+         store="xbox",
+         name=name,
+         price=price_str,
+         image=str(image_url),
+         href=str(href),
+         uuid=str(pid) if pid else None,
+         platforms=platforms,
+         rating=rating,
+         type=product_type,
+      )
 
    # ---------- Strategy A: JSON search API (optional) ----------
 
