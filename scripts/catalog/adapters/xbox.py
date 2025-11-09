@@ -7,6 +7,8 @@ from urllib.parse import quote_plus, urlparse, parse_qs
 from dataclasses import dataclass
 from typing import AsyncIterator, Dict, Any, Iterable, List, Optional, Set
 
+import httpx
+
 from catalog.adapters.base import Adapter, AdapterConfig, Capabilities
 from catalog.models import GameRecord
 from catalog.normalize import (
@@ -224,13 +226,21 @@ class XboxAdapter(Adapter):
             payload[continuation_key] = continuation
 
          headers["Ms-Cv"] = self._next_ms_cv()
-         resp = await self.request(
-            "POST",
-            self.endpoints.browse_api,
-            params={"locale": locale},
-            headers=headers,
-            json=payload,
-         )
+         try:
+            resp = await self.request(
+               "POST",
+               self.endpoints.browse_api,
+               params={"locale": locale},
+               headers=headers,
+               json=payload,
+            )
+         except httpx.HTTPStatusError as exc:
+            if exc.response is not None and exc.response.status_code == 403:
+               self.log.warning(
+                  "xbox: browse API returned HTTP 403; falling back to HTML parsing"
+               )
+               break
+            raise
          js = resp.json()
 
          produced = 0
