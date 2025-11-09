@@ -45,11 +45,29 @@ def write_catalog(out_dir: str, store: str, rows: Iterable[GameRecord]) -> None:
          json.dump([i.model_dump(mode="json") for i in arr], fp, ensure_ascii=False, indent=4)
 
    # Write metadata and bang files
+   metadata_path = os.path.join(base, "$.json")
+   previous_size = None
+   if os.path.exists(metadata_path):
+      try:
+         with open(metadata_path, "r", encoding="utf-8") as fp:
+            previous = json.load(fp)
+      except (OSError, ValueError, TypeError):
+         previous = None
+      else:
+         if isinstance(previous, dict) and "size" in previous:
+            try:
+               previous_size = int(previous["size"])
+            except (TypeError, ValueError):
+               previous_size = None
+
+   size = len(bang)
+   delta = size - (previous_size if previous_size is not None else size)
    metadata = {
-      "size": len(bang),
+      "size": size,
+      "new": delta,
       "date": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
    }
-   with open(os.path.join(base, "$.json"), "w", encoding="utf-8") as fp:
+   with open(metadata_path, "w", encoding="utf-8") as fp:
       json.dump(metadata, fp, ensure_ascii=False, indent=4)
 
    with open(os.path.join(base, "!.json"), "w", encoding="utf-8") as fp:
