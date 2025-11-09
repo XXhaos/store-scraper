@@ -75,9 +75,7 @@ class SteamAdapter(Adapter):
       kw.setdefault("retry_429_wait", 15.0)
       response = await super().request(method, url, **kw)
       self._request_count += 1
-      if self._request_count % 100 == 0:
-         self.log.info("Sleeping to respect Steam request limit")
-         await asyncio.sleep(30.0)
+      await asyncio.sleep(1.0)
       return response
 
    # ---------------- helpers ----------------
