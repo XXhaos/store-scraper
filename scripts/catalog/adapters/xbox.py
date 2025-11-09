@@ -157,6 +157,7 @@ class XboxAdapter(Adapter):
       self._initial_encoded_ct: Optional[str] = None
       self._initial_total_items: Optional[int] = None
       self._initial_state_loaded = False
+      self._resume_keys: Set[str] = set()
 
    def _build_product_href(self, name: str, product_id: Optional[str]) -> str:
       if not product_id:
@@ -194,18 +195,34 @@ class XboxAdapter(Adapter):
          await asyncio.sleep(0.2)
 
    def _mark_seen(self, rec: GameRecord, seen: Set[str]) -> bool:
+      key = self._record_key(rec)
+      if key is None:
+         return True
+      if key in self._resume_keys:
+         self._resume_keys.discard(key)
+         seen.add(key)
+         return False
+      if key in seen:
+         return False
+      seen.add(key)
+      return True
+
+   def resume(self, records: List[GameRecord]) -> None:
+      super().resume(records)
+      for record in records:
+         if record.store != self.store:
+            continue
+         key = self._record_key(record)
+         if key:
+            self._resume_keys.add(key)
+
+   def _record_key(self, rec: GameRecord) -> Optional[str]:
       candidates = (
          rec.uuid,
          rec.href,
          rec.name and f"{rec.store}:{rec.name}",
       )
-      key = next((value for value in map(lambda candidate: candidate, candidates) if value), None)
-      if key is None:
-         return True
-      if key in seen:
-         return False
-      seen.add(key)
-      return True
+      return next((value for value in map(lambda candidate: candidate, candidates) if value), None)
 
    # ---------- Strategy A: emerald browse API ----------
 

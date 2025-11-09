@@ -162,6 +162,7 @@ class NintendoAdapter(Adapter):
          },
          seed_pages=_default_seed_pages(self.config.country, self.config.locale),
       )
+      self._resume_keys: Set[str] = set()
 
    async def iter_games(self) -> AsyncIterator[GameRecord]:
       seen: Set[str] = set()
@@ -170,26 +171,25 @@ class NintendoAdapter(Adapter):
       if self.endpoints.search_api:
          for ch in "abcdefghijklmnopqrstuvwxyz":
             async for rec in self._iter_search_api(query=ch, page_size=60):
-               if rec:
-                  key = self._record_key(rec)
-                  if key and key in seen:
-                     continue
-                  if key:
-                     seen.add(key)
+               if rec and self._should_emit(rec, seen):
                   yield rec
          await asyncio.sleep(0.1)
 
       # Strategy B: Listing pages with embedded JSON
       for url in self.endpoints.seed_pages or []:
          async for rec in self._iter_list_page(url):
-            if rec:
-               key = self._record_key(rec)
-               if key and key in seen:
-                  continue
-               if key:
-                  seen.add(key)
+            if rec and self._should_emit(rec, seen):
                yield rec
          await asyncio.sleep(0.2)
+
+   def resume(self, records: List[GameRecord]) -> None:
+      super().resume(records)
+      for record in records:
+         if record.store != self.store:
+            continue
+         key = self._record_key(record)
+         if key:
+            self._resume_keys.add(key)
 
    def _record_key(self, rec: GameRecord) -> Optional[str]:
       candidates = (
@@ -198,6 +198,19 @@ class NintendoAdapter(Adapter):
          rec.name and f"{rec.store}:{rec.name}",
       )
       return next((value for value in map(lambda candidate: candidate, candidates) if value), None)
+
+   def _should_emit(self, rec: GameRecord, seen: Set[str]) -> bool:
+      key = self._record_key(rec)
+      if not key:
+         return True
+      if key in self._resume_keys:
+         self._resume_keys.discard(key)
+         seen.add(key)
+         return False
+      if key in seen:
+         return False
+      seen.add(key)
+      return True
 
    # ---------- Strategy A: JSON search API (optional) ----------
 
