@@ -24,8 +24,7 @@ FACTORY = {
 
 async def main():
    ap = argparse.ArgumentParser(description="Crawl game stores and write JSON outputs.")
-   ap.add_argument("--stores", type=str, default="steam",
-                   help="Comma-separated list of stores: steam,psn,xbox,nintendo")
+   ap.add_argument("--stores", type=str, default="psn,xbox,steam,nintendo", help="Comma-separated list of stores: steam,psn,xbox,nintendo")
    ap.add_argument("--out", type=str, default="./out", help="Output directory")
    ap.add_argument("--country", type=str, default="US", help="Region country code (e.g., US)")
    ap.add_argument("--locale", type=str, default="en-US", help="Locale (e.g., en-US)")
