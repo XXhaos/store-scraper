@@ -23,7 +23,8 @@ class DomainLimiter:
 async def fetch(client: httpx.AsyncClient, method: str, url: str, *,
                 params=None, headers=None, json=None, data=None,
                 limiter: DomainLimiter | None = None,
-                max_retries: int = 5) -> httpx.Response:
+                max_retries: int = 5,
+                retry_429_wait: float | None = None) -> httpx.Response:
    attempt = 0
    while True:
       if limiter:
@@ -36,10 +37,13 @@ async def fetch(client: httpx.AsyncClient, method: str, url: str, *,
                r.raise_for_status()
                return r
             wait = min(8.0, (2 ** (attempt - 1)) * 0.5 + random.random() * 0.3)
-            ra = r.headers.get("Retry-After")
-            if ra:
-               try: wait = float(ra)
-               except: ...
+            if r.status_code == 429 and retry_429_wait is not None:
+               wait = retry_429_wait
+            else:
+               ra = r.headers.get("Retry-After")
+               if ra:
+                  try: wait = float(ra)
+                  except: ...
             await asyncio.sleep(wait)
             continue
          r.raise_for_status()

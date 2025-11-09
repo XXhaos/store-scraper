@@ -34,6 +34,11 @@ class SteamAdapter(Adapter):
                 app_list_url: Optional[str] = None,
                 api_key: Optional[str] = None,
                 **kw):
+      if config is None:
+         config = AdapterConfig()
+      if config.rps > 2.0:
+         config.rps = 2.0
+
       super().__init__(config=config, **kw)
       self.include_types = [t.lower() for t in (include_types or ["game"])]
       self.buckets = buckets or ["coming_soon", "specials", "top_sellers", "new_releases"]
@@ -64,6 +69,10 @@ class SteamAdapter(Adapter):
          if rec:
             yield rec
          await asyncio.sleep(0.05)  # polite jitter between app calls
+
+   async def request(self, method: str, url: str, **kw):
+      kw.setdefault("retry_429_wait", 15.0)
+      return await super().request(method, url, **kw)
 
    # ---------------- helpers ----------------
 
