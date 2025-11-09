@@ -36,9 +36,8 @@ class SteamAdapter(Adapter):
                 **kw):
       if config is None:
          config = AdapterConfig()
-      # Steam is sensitive to aggressive polling; enforce ~1 request per 2 seconds.
-      if config.rps > 0.5:
-         config.rps = 0.5
+      # Steam is sensitive to aggressive polling; enforce 1 request per second.
+      config.rps = 1.0
 
       super().__init__(config=config, **kw)
       self.include_types = [t.lower() for t in (include_types or ["game"])]
@@ -49,6 +48,7 @@ class SteamAdapter(Adapter):
       skip_path = os.getenv("STEAM_SKIP_FILE")
       self._skip_file = Path(skip_path) if skip_path else Path(__file__).with_name("skip.txt")
       self._skip_appids: Set[str] = self._load_skip_appids()
+      self._request_count = 0
 
    async def iter_games(self) -> AsyncIterator[GameRecord]:
       # Step 1: seed appids from the global Steam app list, fallback to featured categories
@@ -73,7 +73,12 @@ class SteamAdapter(Adapter):
 
    async def request(self, method: str, url: str, **kw):
       kw.setdefault("retry_429_wait", 15.0)
-      return await super().request(method, url, **kw)
+      response = await super().request(method, url, **kw)
+      self._request_count += 1
+      if self._request_count % 100 == 0:
+         self.log.info("Sleeping to respect Steam request limit")
+         await asyncio.sleep(30.0)
+      return response
 
    # ---------------- helpers ----------------
 
