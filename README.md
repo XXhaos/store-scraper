@@ -155,6 +155,9 @@ crawl.bat --stores steam --out ./out --country US --locale en-US
 
 # Run multiple stores
 crawl.bat --stores steam,psn,xbox,nintendo --out ./out
+
+# Persist progress to resume after interruptions (default path: catalog-cache.db)
+crawl.bat --stores steam --cache-db ./catalog-cache.db
 ```
 
 #### Option 2 — Manage a Virtual Environment
@@ -172,6 +175,15 @@ python scripts/crawl.py --stores steam --out ./out --country US --locale en-US
 # Run multiple stores
 python scripts/crawl.py --stores steam,psn,xbox,nintendo --out ./out
 ```
+
+### Resuming after interruptions
+
+`scripts/crawl.py` caches normalized records to a SQLite database (`catalog-cache.db` by default) so you can restart the crawler after a network outage or reboot without losing progress. Tune the behaviour with:
+
+* `--cache-db PATH_OR_URL` — choose where the cache is stored (file path or SQLAlchemy URL).
+* `--no-cache` — disable caching for the current run.
+* `--no-resume-cache` — continue writing to the cache but skip preloading existing records when a crawl starts.
+* `--cache-commit-interval N` — commit cached records every _N_ entries (defaults to 50).
 
 Outputs will appear as:
 
