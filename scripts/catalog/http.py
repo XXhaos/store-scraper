@@ -48,7 +48,12 @@ async def fetch(client: httpx.AsyncClient, method: str, url: str, *,
             continue
          r.raise_for_status()
          return r
-      except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.RemoteProtocolError):
+      except (
+         httpx.ReadTimeout,
+         httpx.ConnectTimeout,
+         httpx.RemoteProtocolError,
+         httpx.LocalProtocolError,
+      ):
          attempt += 1
          if attempt > max_retries:
             raise
