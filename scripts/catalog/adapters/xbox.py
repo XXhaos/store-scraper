@@ -138,10 +138,10 @@ class XboxAdapter(Adapter):
       super().__init__(config=config, **kw)
       self.endpoints = endpoints or XboxEndpoints(
          browse_api="https://emerald.xboxservices.com/xboxcomfd/browse",
-         search_api=(
-            "https://www.xbox.com/{path_locale}/xwebapp/UnifiedSearch"
-            "?Locale={locale}&Market={country}&Query={query}&Skip={skip}&Take={count}"
-         ),
+         # The old xwebapp/UnifiedSearch endpoint has been deprecated. Leave search_api
+         # unset by default so deployments can provide a modern replacement if they
+         # have one available.
+         search_api=None,
          seed_pages=_default_seed_pages(self.config.country, self.config.locale),
       )
       self._ms_cv_base = "4jJHCSTOdoFi3I6HIa4VZs"
