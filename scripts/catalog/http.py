@@ -61,6 +61,7 @@ async def fetch(client: httpx.AsyncClient, method: str, url: str, *,
          httpx.ConnectTimeout,
          httpx.RemoteProtocolError,
          httpx.LocalProtocolError,
+         httpx.ReadError,
       ):
          attempt += 1
          if attempt > max_retries:
