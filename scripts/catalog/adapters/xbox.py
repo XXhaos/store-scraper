@@ -3,6 +3,7 @@ import asyncio
 import base64
 import json
 import re
+import unicodedata
 from urllib.parse import quote_plus, urlparse, parse_qs
 from dataclasses import dataclass
 from typing import AsyncIterator, Dict, Any, Iterable, List, Optional, Set
@@ -108,6 +109,13 @@ _WININIT_RE = re.compile(
    re.S | re.I
 )
 
+
+def _slugify_title(title: str) -> str:
+   normalized = unicodedata.normalize("NFKD", title or "")
+   ascii_title = normalized.encode("ascii", "ignore").decode("ascii")
+   slug = re.sub(r"[^a-z0-9]+", "-", ascii_title.lower())
+   return slug.strip("-")
+
 @dataclass(slots=True)
 class XboxEndpoints:
    # Public browse endpoint surfaced by emerald.xboxservices.com. Accepts POST with
@@ -149,6 +157,16 @@ class XboxAdapter(Adapter):
       self._initial_encoded_ct: Optional[str] = None
       self._initial_total_items: Optional[int] = None
       self._initial_state_loaded = False
+
+   def _build_product_href(self, name: str, product_id: Optional[str]) -> str:
+      if not product_id:
+         return "https://www.xbox.com/"
+
+      loc = self.config.locale.replace("_", "-").lower()
+      slug = _slugify_title(name)
+      if slug:
+         return f"https://www.xbox.com/{loc}/games/store/{slug}/{product_id}"
+      return f"https://www.xbox.com/{loc}/games/store/{product_id}"
 
    async def iter_games(self) -> AsyncIterator[GameRecord]:
       seen: Set[str] = set()
@@ -475,10 +493,9 @@ class XboxAdapter(Adapter):
          image_url = "https://www.xbox.com/etc.clientlibs/settings/wcm/designs/xbox/glyphs/xbox-glyph.png"
 
       pid = item.get("productId") or item.get("ProductId") or item.get("legacyId")
-      loc = self.config.locale.replace("_", "-").lower()
-      href = item.get("url") or item.get("Url") or (
-         f"https://www.xbox.com/{loc}/games/store/{pid}" if pid else "https://www.xbox.com/"
-      )
+      href = item.get("url") or item.get("Url")
+      if not href:
+         href = self._build_product_href(name, pid)
 
       price_obj = item.get("specificPrices") or {}
       price_entries: Iterable[Dict[str, Any]] = []
@@ -673,13 +690,9 @@ class XboxAdapter(Adapter):
          it.get("ProductPageUrl") or it.get("productPageUrl") or
          it.get("Url") or it.get("url")
       )
+      pid = it.get("ProductId") or it.get("productId") or it.get("id")
       if not href:
-         pid = it.get("ProductId") or it.get("productId") or it.get("id")
-         if pid:
-            loc = self.config.locale.replace("_", "-").lower()
-            href = f"https://www.xbox.com/{loc}/games/store/{pid}"
-         else:
-            href = "https://www.xbox.com/"
+         href = self._build_product_href(name, pid)
 
       # Price normalization: sometimes we get display string, other times amount/currency.
       display = (
