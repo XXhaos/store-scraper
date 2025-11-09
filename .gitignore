@@ -1,6 +1,5 @@
 # Ignore these file-types
 *.txt
-!scripts/catalog/adapters/skip.txt
 
 # Ignore these folders
 .git/
