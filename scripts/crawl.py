@@ -10,6 +10,9 @@ from catalog.adapters.xbox import XboxAdapter
 from catalog.adapters.nintendo import NintendoAdapter
 from catalog.runner import run_adapter
 
+from rich.logging import RichHandler
+from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
 log = logging.getLogger("catalog.crawl")
 
 FACTORY = {
@@ -29,24 +32,40 @@ async def main():
    ap.add_argument("--log-level", type=str, default="INFO", help="Logging level (e.g., INFO, DEBUG)")
    args = ap.parse_args()
 
-   logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO),
-                       format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+   logging.basicConfig(
+      level=getattr(logging, args.log_level.upper(), logging.INFO),
+      format="%(message)s",
+      datefmt="[%X]",
+      handlers=[RichHandler(rich_tracebacks=True, markup=True)],
+   )
 
    cfg = AdapterConfig(country=args.country, locale=args.locale)
    stores = [s.strip().lower() for s in args.stores.split(",") if s.strip()]
 
-   tasks = []
+   configured_stores = []
    for s in stores:
       ctor = FACTORY.get(s)
       if not ctor:
          log.warning("Unknown store requested: %s", s)
          continue
-      log.info("Scheduling crawl for %s", s)
-      tasks.append(run_adapter(ctor(cfg), args.out))
+      configured_stores.append((s, ctor))
 
-   if tasks:
-      log.info("Starting crawl for %d store(s)", len(tasks))
-      await asyncio.gather(*tasks)
+   progress_columns = (
+      SpinnerColumn(),
+      TextColumn("[progress.description]{task.description}", justify="left"),
+      TimeElapsedColumn(),
+   )
+
+   if configured_stores:
+      log.info("Starting crawl for %d store(s)", len(configured_stores))
+      tasks = []
+      with Progress(*progress_columns, transient=False) as progress:
+         for s, ctor in configured_stores:
+            log.info("Scheduling crawl for %s", s)
+            task_id = progress.add_task(f"{s}: pending", start=False, total=None)
+            tasks.append(run_adapter(ctor(cfg), args.out, progress, task_id))
+
+         await asyncio.gather(*tasks)
       log.info("All requested stores completed")
    else:
       log.warning("No valid stores requested")
