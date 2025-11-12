@@ -135,13 +135,16 @@ class CatalogCache:
       if self._pending_writes >= self._commit_interval:
          self.flush()
 
-   def sync_keys(self, store: str, keys: Sequence[str]) -> None:
+  def sync_keys(self, store: str, keys: Sequence[str]) -> None:
       """Remove cached rows for *store* that are no longer present."""
 
       key_list = list(keys)
       stmt = delete(CachedGameRow).where(CachedGameRow.store == store)
       if key_list:
-         stmt = stmt.where(~CachedGameRow.cache_key.in_(key_list))
+         max_sqlite_variables = 900
+         for start in range(0, len(key_list), max_sqlite_variables):
+            chunk = key_list[start : start + max_sqlite_variables]
+            stmt = stmt.where(~CachedGameRow.cache_key.in_(chunk))
       self._session.execute(stmt)
       self.flush()
 
