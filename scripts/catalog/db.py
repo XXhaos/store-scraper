@@ -135,7 +135,7 @@ class CatalogCache:
       if self._pending_writes >= self._commit_interval:
          self.flush()
 
-  def sync_keys(self, store: str, keys: Sequence[str]) -> None:
+   def sync_keys(self, store: str, keys: Sequence[str]) -> None:
       """Remove cached rows for *store* that are no longer present."""
 
       key_list = list(keys)
