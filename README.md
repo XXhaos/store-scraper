@@ -174,6 +174,9 @@ python scripts/crawl.py --stores steam --out ./out --country US --locale en-US
 
 # Run multiple stores
 python scripts/crawl.py --stores steam,psn,xbox,nintendo --out ./out
+
+# Use the authenticated Steam app list (requires a Steam Web API key)
+STEAM_API_KEY=your_key_here python scripts/crawl.py --stores steam --out ./out
 ```
 
 ### Resuming after interruptions

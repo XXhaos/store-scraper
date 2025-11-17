@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import json
 import os
 from pathlib import Path
 from typing import AsyncIterator, Dict, Any, List, Optional, Set
@@ -8,9 +9,10 @@ from catalog.adapters.base import Adapter, AdapterConfig, Capabilities
 from catalog.models import GameRecord
 from catalog.normalize import clean_title, strip_edition_noise, price_to_string
 
-API_FEATURED  = "https://store.steampowered.com/api/featuredcategories"
-API_DETAILS   = "https://store.steampowered.com/api/appdetails"
-API_APP_LIST  = "http://api.steampowered.com/ISteamApps/GetAppList/v0002/"
+API_FEATURED = "https://store.steampowered.com/api/featuredcategories"
+API_DETAILS = "https://store.steampowered.com/api/appdetails"
+API_APP_LIST_V2 = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
+API_APP_LIST_V1 = "https://api.steampowered.com/IStoreService/GetAppList/v1/"
 
 class SteamAdapter(Adapter):
    """
@@ -42,9 +44,10 @@ class SteamAdapter(Adapter):
       super().__init__(config=config, **kw)
       self.include_types = [t.lower() for t in (include_types or ["game"])]
       self.buckets = buckets or ["coming_soon", "specials", "top_sellers", "new_releases"]
-      self._app_list_url = app_list_url or API_APP_LIST
       # allow passing via ctor or environment; empty string treated as absent
       self._api_key = (api_key if api_key is not None else os.getenv("STEAM_API_KEY")) or None
+      self._use_v1 = bool(app_list_url == API_APP_LIST_V1 or (app_list_url is None and self._api_key))
+      self._app_list_url = app_list_url or (API_APP_LIST_V1 if self._use_v1 else API_APP_LIST_V2)
       skip_path = os.getenv("STEAM_SKIP_FILE")
       self._skip_file = Path(skip_path) if skip_path else Path(__file__).with_name(".steamignore")
       self._skip_appids: Set[str] = self._load_skip_appids()
@@ -99,13 +102,14 @@ class SteamAdapter(Adapter):
    # ---------------- helpers ----------------
 
    async def _fetch_app_list_ids(self) -> List[str]:
-      params = {"format": "json"}
-      if self._api_key:
-         params["key"] = self._api_key
-
+      params = self._app_list_params()
+      js: Optional[Dict[str, Any]] = None
       try:
          js = await self.get_json(self._app_list_url, params=params)
       except Exception:
+         js = self._load_local_app_list()
+
+      if not js:
          return []
 
       apps = (((js.get("applist") or {}).get("apps")) or [])
@@ -134,6 +138,25 @@ class SteamAdapter(Adapter):
       # de-dup while preserving order
       seen = set()
       return [a for a in ids if not (a in seen or seen.add(a))]
+
+   def _app_list_params(self) -> Dict[str, Any]:
+      if self._use_v1:
+         params: Dict[str, Any] = {"max_results": 100000, "last_appid": 0}
+         if self._api_key:
+            params["key"] = self._api_key
+         return params
+
+      params = {"format": "json"}
+      if self._api_key:
+         params["key"] = self._api_key
+      return params
+
+   def _load_local_app_list(self) -> Optional[Dict[str, Any]]:
+      try:
+         with Path(__file__).with_name("steam.json").open("r", encoding="utf-8") as fh:
+            return json.load(fh)
+      except (OSError, json.JSONDecodeError):
+         return None
 
    def _record_key(self, rec: GameRecord) -> Optional[str]:
       candidates = (
