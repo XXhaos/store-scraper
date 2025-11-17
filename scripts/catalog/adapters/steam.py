@@ -102,6 +102,9 @@ class SteamAdapter(Adapter):
    # ---------------- helpers ----------------
 
    async def _fetch_app_list_ids(self) -> List[str]:
+      if self._use_v1:
+         return await self._fetch_paginated_app_list_ids()
+
       params = self._app_list_params()
       js: Optional[Dict[str, Any]] = None
       try:
@@ -112,9 +115,47 @@ class SteamAdapter(Adapter):
       if not js:
          return []
 
-      apps = (((js.get("applist") or {}).get("apps")) or [])
+      return self._extract_appids_from_response(js, seen=set())
+
+   async def _fetch_paginated_app_list_ids(self) -> List[str]:
+      max_results = 50000
+      last_appid = 0
       ids: List[str] = []
       seen: set[str] = set()
+      used_local = False
+
+      while True:
+         params = self._app_list_params(last_appid=last_appid, max_results=max_results)
+         try:
+            js = await self.get_json(self._app_list_url, params=params)
+         except Exception:
+            if ids:
+               break
+            js = self._load_local_app_list()
+            used_local = bool(js)
+         if not js:
+            break
+
+         page_ids = self._extract_appids_from_response(js, seen=seen)
+         if not page_ids:
+            break
+
+         ids.extend(page_ids)
+         if used_local:
+            break
+         try:
+            last_appid = int(page_ids[-1])
+         except Exception:
+            break
+
+         if len(page_ids) < max_results:
+            break
+
+      return ids
+
+   def _extract_appids_from_response(self, js: Dict[str, Any], *, seen: Set[str]) -> List[str]:
+      apps = (((js.get("applist") or {}).get("apps")) or [])
+      ids: List[str] = []
       for entry in apps:
          appid = entry.get("appid")
          if not isinstance(appid, int):
@@ -139,9 +180,9 @@ class SteamAdapter(Adapter):
       seen = set()
       return [a for a in ids if not (a in seen or seen.add(a))]
 
-   def _app_list_params(self) -> Dict[str, Any]:
+   def _app_list_params(self, *, last_appid: int = 0, max_results: int = 50000) -> Dict[str, Any]:
       if self._use_v1:
-         params: Dict[str, Any] = {"max_results": 100000, "last_appid": 0}
+         params: Dict[str, Any] = {"max_results": max_results, "last_appid": last_appid}
          if self._api_key:
             params["key"] = self._api_key
          return params
