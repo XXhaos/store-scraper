@@ -7,7 +7,7 @@ _EDITION_RX = re.compile(
    re.I
 )
 _PLATFORM_NOISE_RX = re.compile(
-   r"\b(ps\s*4|ps\s*5|playstation\s*4|playstation\s*5|xbox(\s+one|\s+series\s+x\|?s)?|series\s+x\|?s|nintendo\s+switch|switch)\b",
+   r"(?:(?:for|on) )?\b(ps\s*4|ps\s*5|playstation\s*4|playstation\s*5|xbox(\s+one|\s+series\s+x\|?s)?|series\s+x\|?s|nintendo\s+switch|switch)\b",
    re.I
 )
 
