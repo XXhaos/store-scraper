@@ -527,7 +527,7 @@ class XboxAdapter(Adapter):
       price_str: Optional[str] = None
       for entry in price_entries:
          currency = entry.get("currency") or entry.get("Currency")
-         raw_amount = entry.get("listPrice") or entry.get("msrp") or entry.get("ListPrice")
+         raw_amount = entry.get("msrp") or item.get("msrpPrice") or entry.get("listPrice") or entry.get("ListPrice")
          if raw_amount is None:
             continue
          try:
