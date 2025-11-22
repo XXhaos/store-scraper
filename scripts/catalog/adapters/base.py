@@ -68,7 +68,7 @@ class Adapter(abc.ABC):
    async def __aenter__(self) -> "Adapter":
       if self._http is None:
          # create managed client
-         self._client_cm = make_client()
+         self._client_cm = make_client(timeout=self.config.timeout)
          self._http = await self._client_cm.__aenter__()
       return self
 

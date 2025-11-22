@@ -6,8 +6,8 @@ from aiolimiter import AsyncLimiter
 RETRYABLE = {408, 425, 429, 500, 502, 503, 504}
 
 @asynccontextmanager
-async def make_client():
-   async with httpx.AsyncClient(http2=True, timeout=30.0, headers={
+async def make_client(*, timeout: float = 30.0):
+   async with httpx.AsyncClient(http2=True, timeout=timeout, headers={
       "User-Agent": "game-catalog (contact: maintainer@example.com)",
       "Accept": "application/json, text/html;q=0.9,*/*;q=0.8",
    }) as client:
