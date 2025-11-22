@@ -154,7 +154,7 @@ class SteamAdapter(Adapter):
       return ids
 
    def _extract_appids_from_response(self, js: Dict[str, Any], *, seen: Set[str]) -> List[str]:
-      #           ↓ App-List v1        ↓ App-List v1
+      #           ↓ App-List v2        ↓ App-List v1
       apps = (((  js.get("applist") or js.get("response") or {}).get("apps")) or [])
       ids: List[str] = []
       for entry in apps:
