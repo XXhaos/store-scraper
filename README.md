@@ -19,7 +19,7 @@ This project is used to update the databases used by [Game Store Catalog](https:
 
 ## JSON Schema
 
-The project outputs **two JSON file types**. See the [online builder](https://minkcbos.retool.com/app/game-store-catalog) to help make URL schemas and see examples.
+The project outputs **three JSON file types**. See the [online builder](https://minkcbos.retool.com/app/game-store-catalog) to help make URL schemas and see examples.
 
 ### 1. Bang File: `!.json`
 
